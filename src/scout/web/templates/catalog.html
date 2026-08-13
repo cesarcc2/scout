@@ -1,0 +1,78 @@
+{% extends "base.html" %}
+{% block title %}Catalog · Scout{% endblock %}
+{% block body %}
+
+<section class="panel">
+  <h2>Unrecognised titles
+    <span class="rhs muted">{{ rows|length }} distinct phrasings the matcher couldn't classify</span>
+  </h2>
+  <div class="pad muted" style="font-size:13px;border-bottom:1px solid var(--border)">
+    This is the only part of the system where a language model helps. Copy the prompt
+    below plus these titles into a Claude chat, paste the YAML it returns into
+    <code>catalogs/{{ category }}.yaml</code>, then hit <a href="/status">Reclassify everything</a>.
+    Roughly a once-a-month job — everything else runs without a single model call.
+  </div>
+  {% if rows %}
+  <table>
+    <thead><tr><th>Title</th><th class="num">Seen</th><th class="num">Last seen</th><th></th></tr></thead>
+    <tbody>
+    {% for r in rows %}
+      <tr>
+        <td>{{ r.sample_title }}</td>
+        <td class="num">{{ r.occurrences }}</td>
+        <td class="num muted">{{ r.last_seen.strftime('%d %b') }}</td>
+        <td class="num">
+          <form method="post" action="/catalog/dismiss" style="display:inline">
+            <input type="hidden" name="title_hash" value="{{ r.title_hash }}">
+            <button type="submit" title="Not a product I care about">Dismiss</button>
+          </form>
+        </td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <div class="empty">
+    <h3>Nothing unrecognised</h3>
+    <p>Every listing the collector found matched a catalog rule or was deliberately filtered out.</p>
+  </div>
+  {% endif %}
+</section>
+
+{% if rows %}
+<section class="panel">
+  <h2>Prompt
+    <span class="rhs"><button onclick="copyAll()">Copy prompt + titles</button></span>
+  </h2>
+  <div class="pad"><pre id="prompt">{{ prompt }}
+
+{{ csv }}</pre></div>
+</section>
+{% endif %}
+
+<section class="panel">
+  <h2>Catalog in use</h2>
+  <table class="mini">
+    <tbody>
+      <tr><td>File</td><td class="num"><code>catalogs/{{ category }}.yaml</code></td></tr>
+      <tr><td>Version hash</td><td class="num"><code>{{ catalog.version }}</code></td></tr>
+      <tr><td>Products</td><td class="num">{{ catalog.products|length }}</td></tr>
+      <tr><td>Exclusion rules</td><td class="num">{{ catalog.exclusions|length }}</td></tr>
+      <tr><td>Price modifiers</td><td class="num">{{ catalog.adjusters|length }}</td></tr>
+      <tr><td>Search terms</td><td class="num">{{ catalog.query_terms|length }} broad · {{ deep_terms }} deep</td></tr>
+    </tbody>
+  </table>
+</section>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function copyAll(){
+  const text = document.getElementById('prompt').innerText;
+  navigator.clipboard.writeText(text).then(() => {
+    const b = document.querySelector('.rhs button');
+    b.textContent = 'Copied'; setTimeout(() => b.textContent = 'Copy prompt + titles', 1800);
+  });
+}
+</script>
+{% endblock %}

@@ -1,0 +1,115 @@
+{% extends "base.html" %}
+{% block title %}Deals · Scout{% endblock %}
+{% block body %}
+
+{% if total_listings == 0 %}
+<section class="panel">
+  <div class="empty">
+    <h3>No listings yet</h3>
+    <p>Run the first sweep and Scout will price everything that's on OLX right now.<br>
+       It takes 10–20 minutes and you get a full market snapshot at the end — no waiting for history to build up.</p>
+    <form method="post" action="/jobs/bootstrap" style="margin-top:16px">
+      <button class="primary" type="submit">Sweep the market now</button>
+    </form>
+  </div>
+</section>
+{% else %}
+
+<section class="panel">
+  <h2>Filters
+    <span class="rhs muted">{{ deals|length }} match{{ '' if deals|length == 1 else 'es' }}
+      of {{ active_listings }} live listings</span>
+  </h2>
+  <form class="filters" method="get" action="/">
+    <div class="field">
+      <label for="f-product">Product</label>
+      <select name="product" id="f-product">
+        <option value="">Everything</option>
+        {% for p in products %}
+        <option value="{{ p.id }}" {{ 'selected' if p.id == f.product }}>{{ p.label }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="field">
+      <label for="f-max">Max price €</label>
+      <input type="number" name="max_price" id="f-max" min="0" step="50"
+             value="{{ f.max_price or '' }}" placeholder="any" style="width:110px">
+    </div>
+    <div class="field">
+      <label for="f-pct">Cheapest</label>
+      <select name="pct" id="f-pct">
+        {% for v, lbl in [(0.10,'top 10%'),(0.20,'top 20%'),(0.35,'top 35%'),(0.50,'below median'),(1.0,'everything')] %}
+        <option value="{{ v }}" {{ 'selected' if f.pct == v }}>{{ lbl }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="field">
+      <label for="f-score">Min score</label>
+      <input type="number" name="min_score" id="f-score" min="0" max="100" step="5"
+             value="{{ f.min_score or '' }}" placeholder="0" style="width:90px">
+    </div>
+    <div class="field">
+      <label for="f-conf">Data quality</label>
+      <select name="confidence" id="f-conf">
+        {% for v, lbl in [('low','include thin data'),('medium','8+ comparables'),('high','15+ comparables')] %}
+        <option value="{{ v }}" {{ 'selected' if f.confidence == v }}>{{ lbl }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="field">
+      <label for="f-loc">Location</label>
+      <input type="text" name="location" id="f-loc" value="{{ f.location or '' }}"
+             placeholder="e.g. Porto" style="width:130px">
+    </div>
+    <button class="primary" type="submit">Apply</button>
+    <a href="/" style="padding:8px 4px">Reset</a>
+  </form>
+
+  {% if deals %}
+  <table>
+    <thead><tr>
+      <th>Score</th><th>Listing</th><th class="num">Price</th>
+      <th>Position in market</th><th class="num">vs median</th><th class="num">vs retail</th>
+      <th class="num">Age</th>
+    </tr></thead>
+    <tbody>
+    {% for d in deals %}
+      <tr>
+        <td>
+          <span class="score {% if d.score >= 65 %}hot{% elif d.score >= 45 %}warm{% endif %}">{{ "%.0f"|format(d.score) }}</span>
+        </td>
+        <td>
+          <a href="{{ d.url }}" target="_blank" rel="noopener">{{ d.title[:92] }}</a><br>
+          <a class="tag" href="/product/{{ d.product_id }}">{{ d.product_label }}</a>
+          {% if d.location %}<span class="tag">{{ d.location }}</span>{% endif %}
+          {% for m in d.modifiers %}<span class="tag">{{ m|replace('_',' ') }}</span>{% endfor %}
+          {% if d.reasons %}<div class="why">{{ d.reasons|join(' · ') }}</div>{% endif %}
+          {% if d.cautions %}<div class="caution"><b>Caution:</b> {{ d.cautions|join(' · ') }}</div>{% endif %}
+        </td>
+        <td class="num">
+          <span style="font-size:16px;font-weight:650">€{{ "%.0f"|format(d.price_eur) }}</span>
+          {% if (d.adjusted_eur - d.price_eur)|abs > 5 %}
+            <br><span class="conf">≈€{{ "%.0f"|format(d.adjusted_eur) }} like-for-like</span>
+          {% endif %}
+        </td>
+        <td>
+          {{ meter(d.p10_eur, d.p25_eur, d.p75_eur, d.p90_eur, d.adjusted_eur)|safe }}
+          <span class="conf">n={{ d.sample_size }} · {{ d.confidence }} confidence</span>
+        </td>
+        <td class="num delta-good">−{{ "%.0f"|format(d.below_median_pct) }}%<br>
+          <span class="conf">≈€{{ "%.0f"|format(d.saving_eur) }}</span></td>
+        <td class="num">{% if d.retail_ratio %}{{ "%.0f"|format(d.retail_ratio * 100) }}%{% else %}<span class="muted">—</span>{% endif %}</td>
+        <td class="num">{{ "%.0f"|format(d.days_listed) }}d</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <div class="empty">
+    <h3>Nothing matches those filters</h3>
+    <p>Try widening “Cheapest” to <em>below median</em>, or setting data quality to <em>include thin data</em>.</p>
+  </div>
+  {% endif %}
+</section>
+{% endif %}
+{% endblock %}

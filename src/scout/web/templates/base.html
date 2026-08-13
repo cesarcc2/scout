@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{% block title %}Scout{% endblock %}</title>
+<style>
+/* ---------------------------------------------------------------------------
+   Design tokens. Light is the default; dark is a selected set stepped for the
+   dark surface, not an automatic inversion. Declared under both the media
+   query (OS setting) and the [data-theme] scope (explicit toggle) so the
+   toggle wins either way.
+   --------------------------------------------------------------------------- */
+:root{
+  color-scheme: light;
+  --surface-1:#fcfcfb; --plane:#f9f9f7;
+  --ink:#0b0b0b; --ink-2:#52514e; --muted:#898781;
+  --grid:#e1e0d9; --baseline:#c3c2b7; --border:rgba(11,11,11,.10);
+  --series-1:#2a78d6;
+  --ramp-100:#cde2fb; --ramp-250:#86b6ef; --ramp-550:#1c5cab;
+  --status-good:#0ca30c; --status-warning:#fab219;
+  --status-serious:#ec835a; --status-critical:#d03b3b;
+  --delta-good:#006300;
+  --radius:10px;
+}
+@media (prefers-color-scheme: dark){
+  :root:where(:not([data-theme="light"])){
+    color-scheme: dark;
+    --surface-1:#1a1a19; --plane:#0d0d0d;
+    --ink:#ffffff; --ink-2:#c3c2b7; --muted:#898781;
+    --grid:#2c2c2a; --baseline:#383835; --border:rgba(255,255,255,.10);
+    --series-1:#3987e5;
+    --ramp-100:#184f95; --ramp-250:#1c5cab; --ramp-550:#86b6ef;
+    --delta-good:#0ca30c;
+  }
+}
+:root[data-theme="dark"]{
+  color-scheme: dark;
+  --surface-1:#1a1a19; --plane:#0d0d0d;
+  --ink:#ffffff; --ink-2:#c3c2b7; --muted:#898781;
+  --grid:#2c2c2a; --baseline:#383835; --border:rgba(255,255,255,.10);
+  --series-1:#3987e5;
+  --ramp-100:#184f95; --ramp-250:#1c5cab; --ramp-550:#86b6ef;
+  --delta-good:#0ca30c;
+}
+
+*{box-sizing:border-box}
+body{margin:0;background:var(--plane);color:var(--ink);
+  font:14px/1.55 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+a{color:var(--series-1);text-decoration:none}
+a:hover{text-decoration:underline}
+.num{text-align:right;font-variant-numeric:tabular-nums}
+.muted{color:var(--muted)}
+.strong{font-weight:650}
+
+/* ---- shell ---- */
+header.top{position:sticky;top:0;z-index:20;background:var(--surface-1);
+  border-bottom:1px solid var(--border);padding:0 20px;
+  display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+.brand{font-weight:700;letter-spacing:-.02em;font-size:16px;margin-right:14px;
+  color:var(--ink);padding:14px 0}
+header.top nav{display:flex;gap:2px;flex:1;flex-wrap:wrap}
+header.top nav a{padding:14px 12px;color:var(--ink-2);font-weight:500;
+  border-bottom:2px solid transparent;margin-bottom:-1px}
+header.top nav a:hover{color:var(--ink);text-decoration:none}
+header.top nav a.on{color:var(--ink);border-bottom-color:var(--series-1);font-weight:600}
+main{padding:22px 20px 60px;max-width:1220px;margin:0 auto;display:grid;gap:20px}
+
+/* ---- panels ---- */
+section.panel{background:var(--surface-1);border:1px solid var(--border);
+  border-radius:var(--radius);overflow:hidden}
+.panel > h2{font-size:12px;margin:0;padding:13px 16px;border-bottom:1px solid var(--border);
+  font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.07em;
+  display:flex;justify-content:space-between;align-items:center;gap:12px}
+.panel > h2 .rhs{text-transform:none;letter-spacing:0;font-weight:500}
+.pad{padding:16px}
+
+/* ---- tables ---- */
+table{width:100%;border-collapse:collapse}
+th{text-align:left;font-size:11px;text-transform:uppercase;letter-spacing:.05em;
+  color:var(--muted);font-weight:600;padding:9px 14px;border-bottom:1px solid var(--border);
+  white-space:nowrap}
+td{padding:11px 14px;border-bottom:1px solid var(--border);vertical-align:top}
+tbody tr:last-child td{border-bottom:none}
+tbody tr:hover{background:color-mix(in srgb, var(--series-1) 5%, transparent)}
+table.mini th,table.mini td{padding:5px 10px;font-size:12px}
+
+/* ---- controls ---- */
+form.filters{display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;
+  padding:14px 16px;border-bottom:1px solid var(--border)}
+.field{display:flex;flex-direction:column;gap:4px}
+.field label{font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);
+  font-weight:600}
+input,select,button{font:inherit;color:var(--ink);background:var(--surface-1);
+  border:1px solid var(--baseline);border-radius:7px;padding:7px 10px}
+input:focus,select:focus{outline:2px solid var(--series-1);outline-offset:-1px}
+button{cursor:pointer;font-weight:600}
+button.primary{background:var(--series-1);border-color:var(--series-1);color:#fff}
+button.primary:hover{filter:brightness(1.08)}
+button:disabled{opacity:.5;cursor:not-allowed}
+.searchbar{display:flex;gap:8px;padding:16px;flex-wrap:wrap}
+.searchbar input[type=search]{flex:1;min-width:240px;font-size:15px;padding:10px 12px}
+
+/* ---- chips ---- */
+.tag{display:inline-block;padding:1px 7px;border:1px solid var(--border);border-radius:5px;
+  font-size:11px;color:var(--ink-2);margin:0 4px 3px 0;white-space:nowrap;
+  background:var(--plane)}
+.tag.warn{border-color:var(--status-warning);color:var(--ink-2)}
+.pill{border:1px solid var(--border);border-radius:20px;padding:3px 11px;
+  color:var(--ink-2);font-size:12px;background:var(--plane);white-space:nowrap}
+
+/* ---- score badge: colour is a redundant cue, the number is the label ---- */
+.score{display:inline-block;min-width:40px;padding:3px 8px;border-radius:6px;
+  font-weight:700;font-size:13px;text-align:center;font-variant-numeric:tabular-nums;
+  background:var(--ramp-100);color:var(--ink)}
+.score.hot{background:var(--status-good);color:#06210a}
+.score.warm{background:var(--status-warning);color:#241800}
+
+.conf{font-size:11px;color:var(--muted)}
+.delta-good{color:var(--delta-good);font-weight:650}
+.caution{color:var(--ink-2);font-size:12px;margin-top:4px}
+.caution b{color:var(--status-critical);font-weight:700}
+.why{color:var(--muted);font-size:12px;margin-top:4px}
+
+/* ---- charts ---- */
+svg.chart{width:100%;height:auto;display:block}
+.tick{fill:var(--muted);font-size:11px;font-variant-numeric:tabular-nums;
+  font-family:system-ui,-apple-system,sans-serif}
+.tick.strong{fill:var(--ink-2);font-weight:650}
+svg.meter,svg.spark{display:block}
+.tableview{margin-top:12px}
+.tableview summary{cursor:pointer;color:var(--muted);font-size:12px}
+
+/* ---- misc ---- */
+.empty{padding:44px 20px;text-align:center;color:var(--muted)}
+.empty h3{color:var(--ink);margin:0 0 6px;font-size:16px}
+.bar-outer{height:6px;background:var(--ramp-100);border-radius:3px;overflow:hidden}
+.bar-inner{height:100%;background:var(--series-1);border-radius:3px;transition:width .4s}
+.grid2{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:20px}
+.stat{padding:14px 16px}
+.stat .label{font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);
+  font-weight:600}
+.stat .value{font-size:26px;font-weight:650;letter-spacing:-.02em;margin-top:2px}
+.hero{font-size:48px;font-weight:650;letter-spacing:-.03em;line-height:1.1}
+code{background:var(--plane);border:1px solid var(--border);border-radius:5px;
+  padding:1px 5px;font-size:12.5px}
+pre{background:var(--plane);border:1px solid var(--border);border-radius:8px;
+  padding:14px;overflow:auto;font-size:12.5px;line-height:1.5}
+.themetoggle{border:none;background:none;color:var(--muted);padding:14px 8px;font-size:16px}
+</style>
+</head>
+<body>
+<header class="top">
+  <span class="brand">Scout</span>
+  <nav>
+    <a href="/" class="{{ 'on' if page == 'deals' }}">Deals</a>
+    <a href="/products" class="{{ 'on' if page == 'products' }}">Products</a>
+    <a href="/compare" class="{{ 'on' if page == 'compare' }}">Compare</a>
+    <a href="/search" class="{{ 'on' if page == 'search' }}">Live search</a>
+    <a href="/catalog" class="{{ 'on' if page == 'catalog' }}">Catalog</a>
+    <a href="/status" class="{{ 'on' if page == 'status' }}">Status</a>
+  </nav>
+  <button class="themetoggle" onclick="toggleTheme()" title="Toggle light/dark" aria-label="Toggle theme">◐</button>
+</header>
+<main>
+{% block body %}{% endblock %}
+</main>
+<script>
+function toggleTheme(){
+  const cur = document.documentElement.getAttribute('data-theme');
+  const next = cur === 'dark' ? 'light' : (cur === 'light' ? 'dark' :
+    (matchMedia('(prefers-color-scheme: dark)').matches ? 'light' : 'dark'));
+  document.documentElement.setAttribute('data-theme', next);
+  try { localStorage.setItem('scout-theme', next); } catch (e) {}
+}
+try {
+  const saved = localStorage.getItem('scout-theme');
+  if (saved) document.documentElement.setAttribute('data-theme', saved);
+} catch (e) {}
+</script>
+{% block scripts %}{% endblock %}
+</body>
+</html>

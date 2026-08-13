@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+{% block title %}Products · Scout{% endblock %}
+{% block body %}
+<section class="panel">
+  <h2>Market by product
+    <span class="rhs muted">rolling {{ window_days }}-day window · private sellers only</span>
+  </h2>
+  <table>
+    <thead><tr>
+      <th>Product</th><th class="num">Listings</th><th>Confidence</th>
+      <th class="num">Cheapest</th><th class="num">p25</th><th class="num">Median</th>
+      <th class="num">p75</th><th class="num">Retail</th><th class="num">Used vs new</th>
+    </tr></thead>
+    <tbody>
+    {% for row in rows %}
+      <tr>
+        <td><a href="/product/{{ row.product.id }}">{{ row.product.label }}</a>
+          <span class="tag">{{ row.product.brand }}</span>
+          {% if row.product.attributes.get('vram_gb') %}
+            <span class="tag">{{ row.product.attributes.vram_gb|int }}GB</span>{% endif %}
+        </td>
+        <td class="num">{{ row.dist.n }}</td>
+        <td><span class="tag {{ 'warn' if row.dist.confidence in ('low','none') }}">{{ row.dist.confidence }}</span></td>
+        <td class="num">{% if row.dist.n %}€{{ "%.0f"|format(row.dist.values[0]) }}{% else %}—{% endif %}</td>
+        <td class="num">{% if row.dist.n %}€{{ "%.0f"|format(row.dist.p25) }}{% else %}—{% endif %}</td>
+        <td class="num strong">{% if row.dist.n %}€{{ "%.0f"|format(row.dist.p50) }}{% else %}—{% endif %}</td>
+        <td class="num">{% if row.dist.n %}€{{ "%.0f"|format(row.dist.p75) }}{% else %}—{% endif %}</td>
+        <td class="num">{% if row.retail %}€{{ "%.0f"|format(row.retail) }}{% else %}—{% endif %}</td>
+        <td class="num">
+          {% if row.ratio %}{{ "%.0f"|format(row.ratio * 100) }}%{% else %}<span class="muted">—</span>{% endif %}
+        </td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</section>
+{% endblock %}

@@ -1,0 +1,34 @@
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: scout
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-scout}
+      POSTGRES_DB: scout
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U scout"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  scout:
+    build: .
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    env_file: .env
+    environment:
+      SCOUT_DSN: postgresql://scout:${POSTGRES_PASSWORD:-scout}@db:5432/scout
+    volumes:
+      - ./catalogs:/app/catalogs:ro
+      - ./data:/app/data
+    ports:
+      - "8077:8077"
+    command: ["python", "-m", "scout.cli", "serve"]
+
+volumes:
+  pgdata:

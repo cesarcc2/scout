@@ -1,0 +1,75 @@
+{% extends "base.html" %}
+{% block title %}Live search · Scout{% endblock %}
+{% block body %}
+<section class="panel">
+  <h2>Search OLX right now
+    <span class="rhs muted">fetches live, prices it against the catalog, keeps what it finds</span>
+  </h2>
+  <form class="searchbar" method="get" action="/search">
+    <input type="search" name="q" value="{{ q or '' }}" placeholder="rtx 5070 ti"
+           autofocus aria-label="Search query">
+    <select name="pages" aria-label="Pages to fetch">
+      {% for p in [1,2,3,5] %}
+      <option value="{{ p }}" {{ 'selected' if pages == p }}>{{ p }} page{{ '' if p == 1 else 's' }}</option>
+      {% endfor %}
+    </select>
+    <button class="primary" type="submit">Search</button>
+  </form>
+  <div class="pad muted" style="border-top:1px solid var(--border);font-size:12.5px;padding-top:12px">
+    Each page is ~40 listings and takes a few seconds — the collector deliberately
+    waits between requests. Anything found here is stored, so ad-hoc searches also
+    make the price distributions better.
+  </div>
+</section>
+
+{% if q %}
+<section class="panel">
+  <h2>{{ results|length }} result{{ '' if results|length == 1 else 's' }} for “{{ q }}”</h2>
+  {% if results %}
+  <table>
+    <thead><tr>
+      <th>Listing</th><th>Identified as</th><th class="num">Price</th>
+      <th class="num">vs median</th><th>Position</th><th class="num">Age</th>
+    </tr></thead>
+    <tbody>
+    {% for r in results %}
+      <tr>
+        <td><a href="{{ r.url }}" target="_blank" rel="noopener">{{ r.title[:90] }}</a><br>
+          {% if r.location %}<span class="tag">{{ r.location }}</span>{% endif %}
+          {% for m in r.modifiers %}<span class="tag">{{ m|replace('_',' ') }}</span>{% endfor %}
+        </td>
+        <td>
+          {% if r.product_id %}
+            <a href="/product/{{ r.product_id }}">{{ r.product_label }}</a>
+            {% if r.match_kind == 'fuzzy' %}<span class="tag warn">fuzzy match</span>{% endif %}
+            <div class="conf">n={{ r.sample_size }} · {{ r.confidence }}</div>
+          {% elif r.excluded_by %}
+            <span class="tag warn">filtered: {{ r.excluded_by|replace('_',' ') }}</span>
+          {% else %}
+            <span class="muted">not in catalog</span>
+          {% endif %}
+        </td>
+        <td class="num strong">€{{ "%.0f"|format(r.price_eur) }}</td>
+        <td class="num {{ 'delta-good' if r.vs_median and r.vs_median > 0 }}">
+          {% if r.vs_median is not none and r.median_eur %}
+            {{ '−' if r.vs_median > 0 else '+' }}{{ "%.0f"|format(r.vs_median|abs) }}%
+          {% else %}<span class="muted">—</span>{% endif %}
+        </td>
+        <td>
+          {% if r.product_id and r.product_id in dists and dists[r.product_id].n %}
+            {% set d = dists[r.product_id] %}
+            {{ meter(d.p10, d.p25, d.p75, d.p90, r.adjusted_eur)|safe }}
+          {% endif %}
+        </td>
+        <td class="num">{{ "%.0f"|format(r.days_listed) }}d</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <div class="empty">Nothing came back. Try a broader term, or check the Status page
+    if you think the collector is being blocked.</div>
+  {% endif %}
+</section>
+{% endif %}
+{% endblock %}

@@ -1,0 +1,80 @@
+{% extends "base.html" %}
+{% block title %}{{ product.label }} · Scout{% endblock %}
+{% block body %}
+
+<section class="panel">
+  <h2>{{ product.label }}
+    <span class="rhs">
+      <a href="/?product={{ product.id }}">deals only</a> ·
+      <a href="/compare?only={{ product.id }}">compare</a>
+    </span>
+  </h2>
+  <div class="grid2 pad" style="gap:14px">
+    <div class="stat">
+      <div class="label">Median used price</div>
+      <div class="hero">{% if dist.n %}€{{ "%.0f"|format(dist.p50) }}{% else %}—{% endif %}</div>
+      <div class="muted">{{ dist.n }} live listings · {{ dist.confidence }} confidence
+        {%- if retail %} · retail €{{ "%.0f"|format(retail) }}{% endif %}</div>
+    </div>
+    <div class="stat">
+      <div class="label">A patient buyer pays (p25)</div>
+      <div class="value">{% if dist.n %}€{{ "%.0f"|format(dist.p25) }}{% else %}—{% endif %}</div>
+      <div class="label" style="margin-top:12px">Cheapest listed right now</div>
+      <div class="value">{% if listings %}€{{ "%.0f"|format(listings[0].price_eur) }}{% else %}—{% endif %}</div>
+    </div>
+    <div class="stat">
+      {% if ratio %}
+      <div class="label">Used vs new</div>
+      <div class="value">{{ "%.0f"|format(ratio * 100) }}%</div>
+      <div class="muted">of the cheapest retail price</div>
+      {% endif %}
+      {% for key, meta in attributes.items() %}
+        {% if product.attributes.get(key) %}
+        <div class="label" style="margin-top:12px">{{ meta.label }}</div>
+        <div class="value">{{ product.attributes[key]|round|int }}</div>
+        {% endif %}
+      {% endfor %}
+    </div>
+  </div>
+</section>
+
+<section class="panel">
+  <h2>Price distribution
+    <span class="rhs muted">every live private-seller listing, like-for-like adjusted</span>
+  </h2>
+  <div class="pad">
+    {{ chart|safe }}
+    {{ chart_table|safe }}
+  </div>
+</section>
+
+<section class="panel">
+  <h2>Live listings <span class="rhs muted">{{ listings|length }} on the market</span></h2>
+  {% if listings %}
+  <table>
+    <thead><tr>
+      <th>Listing</th><th class="num">Price</th><th class="num">Like-for-like</th>
+      <th class="num">vs median</th><th>Position</th><th class="num">Age</th>
+    </tr></thead>
+    <tbody>
+    {% for l in listings %}
+      <tr>
+        <td><a href="{{ l.url }}" target="_blank" rel="noopener">{{ l.title[:88] }}</a><br>
+          {% if l.location %}<span class="tag">{{ l.location }}</span>{% endif %}
+          {% for m in l.modifiers %}<span class="tag">{{ m|replace('_',' ') }}</span>{% endfor %}
+        </td>
+        <td class="num strong">€{{ "%.0f"|format(l.price_eur) }}</td>
+        <td class="num">€{{ "%.0f"|format(l.adjusted_eur) }}</td>
+        <td class="num {{ 'delta-good' if l.vs_median > 0 }}">
+          {{ '−' if l.vs_median > 0 else '+' }}{{ "%.0f"|format(l.vs_median|abs) }}%</td>
+        <td>{{ meter(dist.p10, dist.p25, dist.p75, dist.p90, l.adjusted_eur)|safe }}</td>
+        <td class="num">{{ "%.0f"|format(l.days_listed) }}d</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <div class="empty">Nothing live for this product right now.</div>
+  {% endif %}
+</section>
+{% endblock %}

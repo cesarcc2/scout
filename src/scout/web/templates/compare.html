@@ -1,0 +1,81 @@
+{% extends "base.html" %}
+{% block title %}Compare · Scout{% endblock %}
+{% block body %}
+<section class="panel">
+  <h2>Which one is actually the better buy?
+    <span class="rhs muted">cost per point of {{ rank_by_label }}</span>
+  </h2>
+  <form class="filters" method="get" action="/compare">
+    <div class="field">
+      <label for="c-basis">Price basis</label>
+      <select name="basis" id="c-basis">
+        {% for v, lbl in [('p25','what a patient buyer pays (p25)'),('median','typical used price'),('best','cheapest listed now'),('retail','buying new')] %}
+        <option value="{{ v }}" {{ 'selected' if f.basis == v }}>{{ lbl }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="field">
+      <label for="c-vram">Min VRAM (GB)</label>
+      <input type="number" name="min_vram" id="c-vram" min="0" step="2"
+             value="{{ f.min_vram or '' }}" placeholder="any" style="width:110px">
+    </div>
+    <div class="field">
+      <label for="c-tdp">Max board power (W)</label>
+      <input type="number" name="max_tdp" id="c-tdp" min="0" step="25"
+             value="{{ f.max_tdp or '' }}" placeholder="any" style="width:150px">
+    </div>
+    <div class="field">
+      <label for="c-only">Only these (comma-separated ids)</label>
+      <input type="text" name="only" id="c-only" value="{{ f.only or '' }}"
+             placeholder="rtx_5070_ti,rx_9070_xt" style="width:230px">
+    </div>
+    <button class="primary" type="submit">Apply</button>
+    <a href="/compare" style="padding:8px 4px">Reset</a>
+  </form>
+
+  <table>
+    <thead><tr>
+      <th>Product</th><th class="num">{{ rank_by_label }}</th>
+      <th class="num">Price used</th><th class="num">€ per point</th>
+      <th>Value for money</th><th class="num">Cheapest now</th><th class="num">n</th>
+    </tr></thead>
+    <tbody>
+    {% for r in rows %}
+      <tr>
+        <td><a href="/product/{{ r.product_id }}">{{ r.label }}</a>
+          <span class="tag">{{ r.brand }}</span>
+          {% if r.attributes.get('vram_gb') %}<span class="tag">{{ r.attributes.vram_gb|int }}GB</span>{% endif %}
+          {% if r.attributes.get('tdp_w') %}<span class="tag">{{ r.attributes.tdp_w|int }}W</span>{% endif %}
+          {% if r.sample_size < 8 %}<span class="tag warn">thin data</span>{% endif %}
+        </td>
+        <td class="num">{{ r.attributes.get(rank_by, 0)|round|int }}</td>
+        <td class="num">{% if r.basis_price %}€{{ "%.0f"|format(r.basis_price) }}{% else %}<span class="muted">no data</span>{% endif %}</td>
+        <td class="num strong">{% if r.cost_per_point %}€{{ "%.2f"|format(r.cost_per_point) }}{% else %}—{% endif %}</td>
+        <td>
+          {% if r.value_index %}
+          <div style="display:flex;align-items:center;gap:8px">
+            <div class="bar-outer" style="flex:1;max-width:150px">
+              <div class="bar-inner" style="width:{{ r.value_index }}%"></div>
+            </div>
+            <span class="num" style="min-width:34px">{{ "%.0f"|format(r.value_index) }}</span>
+          </div>
+          {% else %}<span class="muted">—</span>{% endif %}
+        </td>
+        <td class="num">
+          {% if r.best_active_eur %}
+            <a href="{{ r.best_active_url }}" target="_blank" rel="noopener">€{{ "%.0f"|format(r.best_active_eur) }}</a>
+          {% else %}<span class="muted">—</span>{% endif %}
+        </td>
+        <td class="num">{{ r.sample_size }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  <div class="pad muted" style="border-top:1px solid var(--border);font-size:12.5px">
+    Value for money is relative: 100 is the best €-per-point in this filtered set.
+    The performance figures come from <code>catalogs/{{ category }}.yaml</code> and are
+    shipped as unverified approximations — replace them with TechPowerUp numbers
+    before betting money on this ranking.
+  </div>
+</section>
+{% endblock %}

@@ -1,0 +1,124 @@
+{% extends "base.html" %}
+{% block title %}Status · Scout{% endblock %}
+{% block body %}
+
+<section class="panel">
+  <h2>Run something <span class="rhs muted">one job at a time, so the site never sees two sweeps at once</span></h2>
+  <div class="pad">
+    <div id="jobbox" style="margin-bottom:14px"></div>
+    <div style="display:flex;gap:10px;flex-wrap:wrap">
+      <form method="post" action="/jobs/bootstrap"><button class="primary" type="submit">
+        Full market sweep</button></form>
+      <form method="post" action="/jobs/cycle"><button type="submit">
+        Quick cycle</button></form>
+      <form method="post" action="/jobs/retail"><button type="submit">
+        Refresh retail prices</button></form>
+      <form method="post" action="/jobs/normalize"><button type="submit">
+        Reclassify everything</button></form>
+    </div>
+    <p class="muted" style="margin:14px 0 0;font-size:12.5px">
+      <b>Full market sweep</b> queries every product in the catalog by name and pages
+      deep — 10–20 minutes, and it's what gives you a complete picture on day one.
+      <b>Quick cycle</b> uses the broad search terms only and takes a couple of minutes;
+      it's what the scheduler runs every {{ cycle_minutes }} minutes.
+      <b>Reclassify</b> re-runs the matcher over your entire history — do this after
+      editing a catalog YAML.
+    </p>
+  </div>
+</section>
+
+<div class="grid2">
+  <section class="panel">
+    <h2>Collection</h2>
+    <table class="mini">
+      <tbody>
+        <tr><td>Live listings</td><td class="num strong">{{ stats.active }}</td></tr>
+        <tr><td>Total ever seen</td><td class="num">{{ stats.total }}</td></tr>
+        <tr><td>Gone (sold or withdrawn)</td><td class="num">{{ stats.disappeared }}</td></tr>
+        <tr><td>Likely sold fast (price signal)</td><td class="num">{{ stats.sold_proxy }}</td></tr>
+        <tr><td>Last seen</td><td class="num">{{ stats.last_seen or '—' }}</td></tr>
+        <tr><td>Oldest listing tracked</td><td class="num">{{ stats.oldest or '—' }}</td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section class="panel">
+    <h2>Matcher coverage</h2>
+    <div class="pad">
+      <div style="display:flex;align-items:center;gap:12px;margin-bottom:10px">
+        <div class="bar-outer" style="flex:1"><div class="bar-inner" style="width:{{ coverage_pct }}%"></div></div>
+        <span class="strong num">{{ "%.1f"|format(coverage_pct) }}%</span>
+      </div>
+      <table class="mini">
+        <tbody>
+          <tr><td>Matched by rule</td><td class="num">{{ totals.get('rule', 0) }}</td></tr>
+          <tr><td>Matched fuzzily</td><td class="num">{{ totals.get('fuzzy', 0) }}</td></tr>
+          <tr><td>Filtered out (wanted ads, faulty, whole PCs)</td><td class="num">{{ totals.get('excluded', 0) }}</td></tr>
+          <tr><td>Unrecognised</td><td class="num">{{ totals.get('none', 0) }}</td></tr>
+        </tbody>
+      </table>
+      {% if totals.get('none', 0) %}
+      <p style="margin:12px 0 0"><a href="/catalog">Review the {{ unmatched_count }} unrecognised titles →</a></p>
+      {% endif %}
+    </div>
+  </section>
+
+  <section class="panel">
+    <h2>Alerting</h2>
+    <table class="mini">
+      <tbody>
+        <tr><td>ntfy topic</td><td class="num">{{ settings.ntfy_topic or 'not configured' }}</td></tr>
+        <tr><td>Telegram</td><td class="num">{{ 'configured' if settings.telegram_token else 'not configured' }}</td></tr>
+        <tr><td>Alerts sent</td><td class="num">{{ stats.alerted }}</td></tr>
+        <tr><td>Deal threshold</td><td class="num">bottom {{ (settings.deal_percentile * 100)|round|int }}%</td></tr>
+        <tr><td>Sweep interval</td><td class="num">{{ cycle_minutes }} min</td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section class="panel">
+    <h2>Retail sources</h2>
+    {% if retail_rows %}
+    <table class="mini">
+      <thead><tr><th>Source</th><th class="num">Products priced</th><th class="num">Last run</th></tr></thead>
+      <tbody>
+        {% for r in retail_rows %}
+        <tr><td>{{ r.source }}</td><td class="num">{{ r.n }}</td><td class="num">{{ r.last }}</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <div class="pad muted">No retail prices scraped yet. Catalog fallback values are being
+      used for the “vs retail” column — run <em>Refresh retail prices</em> to get real ones.</div>
+    {% endif %}
+  </section>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const box = document.getElementById('jobbox');
+function render(j){
+  if (j.status === 'idle') { box.innerHTML = '<span class="muted">Nothing running.</span>'; return; }
+  const pct = j.total ? j.pct : (j.status === 'running' ? 100 : 100);
+  const indet = j.status === 'running' && !j.total;
+  let head = '';
+  if (j.status === 'running') head = `Running <b>${j.name}</b> — ${j.detail || 'starting'}` +
+      (j.total ? ` (${j.step}/${j.total})` : '') + ` · ${j.elapsed}s`;
+  else if (j.status === 'done') head = `Finished <b>${j.name}</b> in ${j.elapsed}s — ` +
+      `${JSON.stringify(j.result).slice(0, 260)}`;
+  else head = `<b>${j.name}</b> failed: ${j.error}`;
+  box.innerHTML =
+    `<div style="margin-bottom:8px">${head}</div>` +
+    (j.status === 'running'
+      ? `<div class="bar-outer"><div class="bar-inner" style="width:${indet ? 100 : pct}%;opacity:${indet ? .45 : 1}"></div></div>`
+      : '');
+}
+async function poll(){
+  try { const r = await fetch('/api/job'); const j = await r.json(); render(j);
+        if (j.status === 'running') setTimeout(poll, 1500); else setTimeout(poll, 6000); }
+  catch (e) { setTimeout(poll, 8000); }
+}
+poll();
+</script>
+{% endblock %}
