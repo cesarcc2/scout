@@ -117,6 +117,7 @@ button:disabled{opacity:.5;cursor:not-allowed}
 .score.warm{background:var(--status-warning);color:#241800}
 
 .conf{font-size:11px;color:var(--muted)}
+td.num .conf{white-space:nowrap}
 .delta-good{color:var(--delta-good);font-weight:650}
 .caution{color:var(--ink-2);font-size:12px;margin-top:4px}
 .caution b{color:var(--status-critical);font-weight:700}
@@ -147,19 +148,32 @@ code{background:var(--plane);border:1px solid var(--border);border-radius:5px;
 pre{background:var(--plane);border:1px solid var(--border);border-radius:8px;
   padding:14px;overflow:auto;font-size:12.5px;line-height:1.5}
 .themetoggle{border:none;background:none;color:var(--muted);padding:14px 8px;font-size:16px}
+.feedlink{color:var(--muted);font-size:11px;font-weight:700;letter-spacing:.05em;
+  border:1px solid var(--border);border-radius:5px;padding:3px 7px}
+.feedlink:hover{color:var(--ink);text-decoration:none}
+/* Unread badge: the dashboard's stand-in for a push notification. The number
+   is the message; the colour is decoration. */
+.badge{display:inline-block;margin-left:6px;padding:0 6px;border-radius:9px;
+  background:var(--series-1);color:#fff;font-size:11px;font-weight:700;
+  line-height:17px;min-width:18px;text-align:center;vertical-align:1px}
+.newflag{display:inline-block;padding:1px 6px;border-radius:4px;font-size:10px;
+  font-weight:700;letter-spacing:.06em;background:var(--series-1);color:#fff;
+  margin-right:5px;vertical-align:1px}
+tr.isnew td{background:color-mix(in srgb, var(--series-1) 6%, transparent)}
 </style>
 </head>
 <body>
 <header class="top">
   <span class="brand">Scout</span>
   <nav>
-    <a href="/" class="{{ 'on' if page == 'deals' }}">Deals</a>
+    <a href="/" class="{{ 'on' if page == 'deals' }}">Deals{% set n = new_deal_count(category) %}{% if n %}<span class="badge">{{ n }}</span>{% endif %}</a>
     <a href="/products" class="{{ 'on' if page == 'products' }}">Products</a>
     <a href="/compare" class="{{ 'on' if page == 'compare' }}">Compare</a>
     <a href="/search" class="{{ 'on' if page == 'search' }}">Live search</a>
     <a href="/catalog" class="{{ 'on' if page == 'catalog' }}">Catalog</a>
     <a href="/status" class="{{ 'on' if page == 'status' }}">Status</a>
   </nav>
+  <a href="/feed.xml" class="feedlink" title="RSS feed of current deals — point any reader at it">RSS</a>
   <button class="themetoggle" onclick="toggleTheme()" title="Toggle light/dark" aria-label="Toggle theme">◐</button>
 </header>
 <main>

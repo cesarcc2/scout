@@ -11,6 +11,7 @@ Everything here works from a single collection sweep. Nothing requires history.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from datetime import datetime
 
 from ..config import settings
 from ..db import query
@@ -46,6 +47,7 @@ class Deal:
     photo_count: int
     sample_size: int
     confidence: str
+    is_new: bool = False
     score: float = 0.0
     reasons: list[str] = field(default_factory=list)
     cautions: list[str] = field(default_factory=list)
@@ -63,7 +65,7 @@ class Deal:
 
 _ACTIVE_SQL = """
 SELECT l.id, l.site, l.url, l.title, l.location, l.price_cents, l.first_seen,
-       l.photo_count,
+       l.photo_count, l.discovered_at,
        n.product_id, n.adjusted_cents, n.modifiers,
        EXTRACT(EPOCH FROM (now() - l.first_seen)) / 86400.0 AS days_listed,
        (SELECT p.price_cents FROM price_point p
@@ -135,7 +137,14 @@ def find_deals(
     max_price: float | None = None,
     location: str | None = None,
     min_confidence: str = "low",
+    seen_at: datetime | None = None,
 ) -> list[Deal]:
+    """Score every live listing against its own market.
+
+    `seen_at` is when the dashboard was last acknowledged; deals discovered
+    after it come back flagged `is_new`. That flag is what lets the web UI
+    stand in for push notifications entirely, for anyone who doesn't want them.
+    """
     cat = catalog_mod.get(category)
     dists = all_distributions(category)
     retail_prices = retail.current_retail(category)
@@ -208,6 +217,7 @@ def find_deals(
                 photo_count=row["photo_count"] or 0,
                 sample_size=dist.n,
                 confidence=dist.confidence,
+                is_new=bool(seen_at and row["discovered_at"] > seen_at),
                 score=score,
                 reasons=reasons,
                 cautions=cautions,

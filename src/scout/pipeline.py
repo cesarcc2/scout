@@ -69,6 +69,12 @@ def collect(category: str, deep: bool = False,
                      len(batch), stats["new"])
 
     totals["disappeared"] = mark_disappeared(category)
+
+    # The dashboard's "new since you last looked" badge is cached; a sweep is
+    # exactly when it goes stale.
+    from .web import uistate
+
+    uistate.invalidate(category)
     return totals
 
 

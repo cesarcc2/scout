@@ -94,3 +94,25 @@ CREATE TABLE IF NOT EXISTS unmatched_title (
     resolved     BOOLEAN NOT NULL DEFAULT FALSE,
     UNIQUE (category, title_hash)
 );
+
+-- When the dashboard was last acknowledged, per category. This is what lets
+-- the UI mark deals as new, which is how the dashboard stands in for push
+-- notifications when you have not configured any.
+CREATE TABLE IF NOT EXISTS ui_state (
+    category      TEXT PRIMARY KEY,
+    deals_seen_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- ---------------------------------------------------------------------------
+-- Migrations. Every statement here is idempotent, so this file stays safe to
+-- re-run against an existing database on every startup.
+-- ---------------------------------------------------------------------------
+
+-- `first_seen` is backdated to the site's own posting date, which makes listing
+-- age real but useless for "what is new to me". `discovered_at` is the honest
+-- answer: the moment this installation first laid eyes on the ad. Set once on
+-- insert, never touched again.
+ALTER TABLE listing ADD COLUMN IF NOT EXISTS
+    discovered_at TIMESTAMPTZ NOT NULL DEFAULT now();
+
+CREATE INDEX IF NOT EXISTS listing_discovered ON listing (category, discovered_at DESC);

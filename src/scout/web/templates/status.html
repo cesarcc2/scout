@@ -64,16 +64,46 @@
   </section>
 
   <section class="panel">
-    <h2>Alerting</h2>
+    <h2>Alerting
+      {% if test_result %}
+      <span class="rhs">
+        {% for channel, ok in test_result.items() %}
+          {% if ok is not none %}
+            <span class="tag {{ '' if ok else 'warn' }}">{{ channel }}: {{ 'delivered' if ok else 'failed' }}</span>
+          {% endif %}
+        {% endfor %}
+        {% if not test_sent %}<span class="tag warn">nothing configured</span>{% endif %}
+      </span>
+      {% endif %}
+    </h2>
     <table class="mini">
       <tbody>
+        <tr><td>Discord webhook</td>
+          <td class="num">{{ 'configured' if settings.discord_webhook_url else 'not configured' }}</td></tr>
         <tr><td>ntfy topic</td><td class="num">{{ settings.ntfy_topic or 'not configured' }}</td></tr>
-        <tr><td>Telegram</td><td class="num">{{ 'configured' if settings.telegram_token else 'not configured' }}</td></tr>
         <tr><td>Alerts sent</td><td class="num">{{ stats.alerted }}</td></tr>
-        <tr><td>Deal threshold</td><td class="num">bottom {{ (settings.deal_percentile * 100)|round|int }}%</td></tr>
+        <tr><td>Alert threshold</td><td class="num">score ≥ 45, bottom {{ (settings.deal_percentile * 100)|round|int }}%</td></tr>
         <tr><td>Sweep interval</td><td class="num">{{ cycle_minutes }} min</td></tr>
       </tbody>
     </table>
+    <div class="pad" style="border-top:1px solid var(--border)">
+      <form method="post" action="/alerts/test">
+        <button type="submit" {{ 'disabled' if not (settings.discord_webhook_url or settings.ntfy_topic) }}>
+          Send a test notification</button>
+      </form>
+      {% if not (settings.discord_webhook_url or settings.ntfy_topic) %}
+      <p class="muted" style="margin:10px 0 0;font-size:12.5px">
+        <b>Push notifications are optional — nothing here is broken.</b>
+        The <a href="/">Deals page</a> flags anything found since you last marked it
+        seen, and <a href="/feed.xml">/feed.xml</a> is a plain RSS feed you can point
+        any reader at. Neither needs configuring.<br><br>
+        If you do want push: create a webhook in Discord under Server Settings →
+        Integrations → Webhooks, pick a channel, and put the URL in
+        <code>SCOUT_DISCORD_WEBHOOK_URL</code> in <code>.env</code>, then restart.
+        No bot or token needed.
+      </p>
+      {% endif %}
+    </div>
   </section>
 
   <section class="panel">

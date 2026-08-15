@@ -166,6 +166,23 @@ def cmd_export(category: str = "gpu", limit: int = 200):
     console.print(f"[dim]prompt: {path.parent / (path.stem + '_prompt.md')}[/]")
 
 
+@app.command("test-alert")
+def cmd_test_alert():
+    """Fire a test notification at every configured channel."""
+    from .alerts.notify import send_test
+
+    results = send_test()
+    if not any(v is not None for v in results.values()):
+        console.print("[yellow]no channels configured — set SCOUT_DISCORD_WEBHOOK_URL[/]")
+        raise typer.Exit(1)
+    for channel, ok in results.items():
+        if ok is None:
+            console.print(f"[dim]{channel}: not configured[/]")
+        else:
+            console.print(f"[{'green' if ok else 'red'}]{channel}: "
+                          f"{'delivered' if ok else 'failed - check the logs'}[/]")
+
+
 @app.command("cycle")
 def cmd_cycle(category: str = "gpu",
               alert: bool = typer.Option(True, help="push notifications")):

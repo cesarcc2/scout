@@ -6,10 +6,11 @@ from dataclasses import asdict
 from pathlib import Path
 
 from fastapi import FastAPI, Form, Query, Request
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from fastapi.templating import Jinja2Templates
 
 from .. import jobs, pipeline
+from ..alerts import notify
 from ..config import settings
 from ..db import query
 from ..normalize import catalog as catalog_mod
@@ -18,7 +19,7 @@ from ..pricing import retail
 from ..pricing.compare import compare
 from ..pricing.deals import active_listings, find_deals
 from ..pricing.stats import all_distributions, distribution
-from . import charts
+from . import charts, uistate
 
 app = FastAPI(title="Scout", docs_url="/api")
 templates = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
@@ -29,6 +30,9 @@ templates.env.globals.update(
     meter=charts.meter,
     sparkline=charts.sparkline,
     settings=settings,
+    # Lets the nav badge render on every page without each route plumbing it
+    # through. Cached, so it costs a dict lookup rather than a rescore.
+    new_deal_count=uistate.new_deal_count,
 )
 
 
@@ -71,6 +75,7 @@ def deals_page(
     cat = catalog_mod.get(category)
     counts = _counts(category)
 
+    seen = uistate.seen_at(category) if counts["total"] else None
     deals = find_deals(
         category,
         limit=80,
@@ -80,6 +85,7 @@ def deals_page(
         max_price=max_price,
         location=location or None,
         min_confidence=confidence,
+        seen_at=seen,
     ) if counts["total"] else []
 
     return templates.TemplateResponse(
@@ -90,11 +96,101 @@ def deals_page(
             "deals": deals,
             "total_listings": counts["total"],
             "active_listings": counts["active"],
+            "new_count": sum(1 for d in deals if d.is_new),
+            "seen_at": seen,
+            "alerts_on": notify.alerts_configured(),
             "f": {"product": product, "max_price": max_price, "pct": pct,
                   "min_score": min_score, "confidence": confidence,
                   "location": location},
         },
     )
+
+
+@app.post("/deals/seen")
+def deals_mark_seen(category: str = Form("")):
+    uistate.mark_seen(category or _default_category())
+    return RedirectResponse("/", status_code=303)
+
+
+# --------------------------------------------------------------------------
+# Deal feed — the zero-configuration alternative to push notifications
+# --------------------------------------------------------------------------
+
+@app.get("/feed.xml")
+def deal_feed(request: Request, category: str | None = None,
+              min_score: float = 45.0, limit: int = 40):
+    """RSS 2.0 of current deals.
+
+    Point any feed reader at this and you get deal notifications without
+    configuring a webhook, without Scout needing outbound network access, and
+    without an account anywhere. Same score threshold the push channels use.
+    """
+    category = category or _default_category()
+    base = str(request.base_url).rstrip("/")
+    deals = find_deals(category, limit=limit, min_score=min_score)
+
+    def esc(text) -> str:
+        return (str(text).replace("&", "&amp;").replace("<", "&lt;")
+                .replace(">", "&gt;").replace('"', "&quot;"))
+
+    def cdata(html_fragment: str) -> str:
+        """Wrap an HTML fragment for <description>.
+
+        The alternative is escaping the whole fragment a second time on top of
+        the per-value escaping, which works but produces `&amp;lt;b&amp;gt;`
+        in the source and is miserable to debug. CDATA keeps the payload
+        readable; the only thing that can break it is a literal `]]>`, which
+        gets split across two sections.
+        """
+        return "<![CDATA[" + html_fragment.replace("]]>", "]]]]><![CDATA[>") + "]]>"
+
+    items = []
+    for d in deals:
+        body = [
+            # The seller's own wording, which is often the deciding detail
+            # ("c/ garantia", "para peças") and is not in the item title.
+            f"<p>{esc(d.title)}</p>",
+            f"<p><strong>€{d.price_eur:,.0f}</strong> — {esc(d.product_label)} "
+            f"({d.score:.0f}/100)</p>",
+            f"<p>{d.below_median_pct:.0f}% below the €{d.median_eur:,.0f} median, "
+            f"saving about €{d.saving_eur:,.0f}. "
+            f"n={d.sample_size} comparable listings ({d.confidence} confidence).</p>",
+        ]
+        if d.retail_ratio:
+            body.append(f"<p>{d.retail_ratio * 100:.0f}% of the "
+                        f"€{d.retail_eur:,.0f} retail price.</p>")
+        if d.location:
+            body.append(f"<p>{esc(d.location)} · listed {d.days_listed:.0f} days ago</p>")
+        if d.reasons:
+            body.append("<ul>" + "".join(f"<li>{esc(r)}</li>" for r in d.reasons) + "</ul>")
+        if d.cautions:
+            body.append("<p><strong>Caution:</strong> "
+                        + esc("; ".join(d.cautions)) + "</p>")
+
+        items.append(
+            "  <item>\n"
+            f"    <title>€{d.price_eur:,.0f} · {esc(d.product_label)} · "
+            f"{d.score:.0f}/100</title>\n"
+            f"    <link>{esc(d.url)}</link>\n"
+            f"    <guid isPermaLink=\"false\">scout-{d.listing_id}-"
+            f"{int(d.price_eur * 100)}</guid>\n"
+            f"    <description>{cdata(''.join(body))}</description>\n"
+            f"    <category>{esc(d.product_label)}</category>\n"
+            "  </item>"
+        )
+
+    xml = (
+        '<?xml version="1.0" encoding="UTF-8"?>\n'
+        '<rss version="2.0">\n<channel>\n'
+        f"  <title>Scout — {esc(category)} deals</title>\n"
+        f"  <link>{esc(base)}/</link>\n"
+        "  <description>Second-hand listings priced below their own "
+        "market.</description>\n"
+        "  <ttl>30</ttl>\n"
+        + "\n".join(items) +
+        "\n</channel>\n</rss>\n"
+    )
+    return Response(content=xml, media_type="application/rss+xml; charset=utf-8")
 
 
 # --------------------------------------------------------------------------
@@ -251,8 +347,9 @@ def catalog_dismiss(title_hash: str = Form(...), category: str = Form("")):
 # --------------------------------------------------------------------------
 
 @app.get("/status", response_class=HTMLResponse)
-def status_page(request: Request, category: str | None = None):
+def status_page(request: Request, category: str | None = None, tested: int = 0):
     category = category or _default_category()
+    test_result = _LAST_TEST if tested else None
 
     row = query(
         """
@@ -301,8 +398,23 @@ def status_page(request: Request, category: str | None = None):
                 "WHERE category = %s AND NOT resolved", (category,))[0]["n"],
             "retail_rows": retail_rows,
             "cycle_minutes": settings.cycle_minutes,
+            "test_result": test_result,
+            "test_sent": bool(test_result and any(
+                v is not None for v in test_result.values())),
         },
     )
+
+
+# Result of the most recent "send a test notification" click, so the redirect
+# back to /status can show what happened.
+_LAST_TEST: dict[str, bool | None] = {}
+
+
+@app.post("/alerts/test")
+def alerts_test():
+    global _LAST_TEST
+    _LAST_TEST = notify.send_test()
+    return RedirectResponse("/status?tested=1", status_code=303)
 
 
 def _launch(name: str, fn) -> RedirectResponse:

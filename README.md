@@ -37,7 +37,7 @@ OLX.pt ──► collector ──► raw listings (kept forever, incl. disappear
                               ▼
                     deal score + value ranking
                               │
-                      ntfy / Telegram push
+                    Discord / ntfy push
                         + web dashboard
 ```
 
@@ -80,7 +80,7 @@ input to a ranking.
 ## Quick start
 
 ```bash
-cp .env.example .env          # set POSTGRES_PASSWORD and SCOUT_NTFY_TOPIC
+cp .env.example .env          # set POSTGRES_PASSWORD and SCOUT_DISCORD_WEBHOOK_URL
 docker compose up -d
 docker compose exec scout python -m scout.cli init
 ```
@@ -113,6 +113,7 @@ After that the scheduler keeps it current: a quick cycle every 45 minutes
 | **Live search** | Type anything, fetch OLX right now, get it priced against the catalog immediately |
 | **Catalog** | The unrecognised titles plus a copy-paste prompt — the monthly AI chore |
 | **Status** | Coverage, collection stats, and buttons to run any job with live progress |
+| **`/feed.xml`** | RSS of current deals — notifications with zero configuration |
 
 No CDN, no JavaScript framework, no build step: charts are server-rendered SVG,
 so the dashboard works on a box with no internet access. Light and dark themes
@@ -132,6 +133,50 @@ python -m scout.cli compare --basis retail         # is used even worth it?
 python -m scout.cli normalize --force              # after editing a catalog
 python -m scout.cli export-unmatched               # the monthly AI chore
 ```
+
+---
+
+## Notifications are optional
+
+Scout is usable with nothing configured at all. Two things make the dashboard
+self-sufficient:
+
+- **The Deals page tracks what's new.** Anything discovered since you last hit
+  *Mark all as seen* is flagged `NEW`, and the count rides in the nav on every
+  page. That's the dashboard doing a notification's job.
+- **`/feed.xml` is a plain RSS feed** of current deals (score ≥ 45 by default;
+  `?min_score=` and `?limit=` override it). Point any reader at it and you get
+  told about deals without Scout needing outbound network access, an account
+  anywhere, or a single line of configuration.
+
+Note that "new to you" is tracked separately from a listing's age. An ad posted
+three months ago that Scout only found on today's sweep is *new to you* and
+gets flagged, while still correctly reporting itself as 90 days old.
+
+If you want push as well:
+
+### Discord
+
+Discord is the default, via a plain webhook — no bot to register, no token to
+refresh, nothing to stay logged in to. In Discord: **Server Settings →
+Integrations → Webhooks → New Webhook**, pick a channel, copy the URL into
+`SCOUT_DISCORD_WEBHOOK_URL`. Then hit **Send a test notification** on the Status
+page (or `python -m scout.cli test-alert`) to confirm it lands.
+
+Deals arrive as embeds — price, gap to median, market position, gap to retail,
+location, listing age — with the reasons behind the score and any cautions
+against it, so you can judge one from the notification without opening the site.
+They're **batched up to 10 per message**, which is both Discord's own limit and
+the difference between one useful ping and twelve annoying ones after a sweep.
+
+ntfy is available alongside or instead (`SCOUT_NTFY_TOPIC`). It sends one
+notification per deal with a tap-through action, which is the better shape on a
+phone lock screen. Enable either, both, or neither.
+
+Each (listing, price) alerts once. If a seller drops the price you get a second
+ping — usually the one worth acting on. With **no** channel configured Scout
+skips the alerting step entirely rather than marking deals as notified, so
+adding a webhook months later still tells you about everything currently live.
 
 ---
 
@@ -260,8 +305,9 @@ src/scout/
   pricing/retail.py          JSON-LD retail scraper, PT/ES shops
   pricing/deals.py           deal scoring with human-readable reasons
   pricing/compare.py         cost per unit of performance
-  alerts/notify.py           ntfy / Telegram
-  web/app.py                 routes
+  alerts/notify.py           Discord webhook + ntfy
+  web/app.py                 routes + RSS feed
+  web/uistate.py             "new since you last looked" tracking
   web/charts.py              server-rendered SVG histogram, meter, sparkline
   web/templates/             the UI
   jobs.py                    one-slot background job runner

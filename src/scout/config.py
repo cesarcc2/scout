@@ -25,10 +25,11 @@ class Settings(BaseSettings):
     cycle_minutes: int = 45
     retail_hour: int = 7
 
+    # Notifications. Both channels are webhook-only: no bot to register, no
+    # token to refresh, nothing to stay logged in to.
+    discord_webhook_url: str = ""
     ntfy_url: str = "https://ntfy.sh"
     ntfy_topic: str = ""
-    telegram_token: str = ""
-    telegram_chat_id: str = ""
 
     # Deal thresholds
     deal_percentile: float = 0.20

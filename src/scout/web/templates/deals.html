@@ -17,8 +17,16 @@
 
 <section class="panel">
   <h2>Filters
-    <span class="rhs muted">{{ deals|length }} match{{ '' if deals|length == 1 else 'es' }}
-      of {{ active_listings }} live listings</span>
+    <span class="rhs">
+      {% if new_count %}
+      <span class="tag" style="border-color:var(--series-1)">{{ new_count }} new since you last looked</span>
+      <form method="post" action="/deals/seen" style="display:inline">
+        <button type="submit">Mark all as seen</button>
+      </form>
+      {% endif %}
+      <span class="muted">{{ deals|length }} match{{ '' if deals|length == 1 else 'es' }}
+        of {{ active_listings }} live listings</span>
+    </span>
   </h2>
   <form class="filters" method="get" action="/">
     <div class="field">
@@ -74,12 +82,12 @@
     </tr></thead>
     <tbody>
     {% for d in deals %}
-      <tr>
+      <tr class="{{ 'isnew' if d.is_new }}">
         <td>
           <span class="score {% if d.score >= 65 %}hot{% elif d.score >= 45 %}warm{% endif %}">{{ "%.0f"|format(d.score) }}</span>
         </td>
         <td>
-          <a href="{{ d.url }}" target="_blank" rel="noopener">{{ d.title[:92] }}</a><br>
+          {% if d.is_new %}<span class="newflag">NEW</span>{% endif %}<a href="{{ d.url }}" target="_blank" rel="noopener">{{ d.title[:92] }}</a><br>
           <a class="tag" href="/product/{{ d.product_id }}">{{ d.product_label }}</a>
           {% if d.location %}<span class="tag">{{ d.location }}</span>{% endif %}
           {% for m in d.modifiers %}<span class="tag">{{ m|replace('_',' ') }}</span>{% endfor %}
@@ -110,6 +118,17 @@
     <p>Try widening “Cheapest” to <em>below median</em>, or setting data quality to <em>include thin data</em>.</p>
   </div>
   {% endif %}
+  <div class="pad muted" style="border-top:1px solid var(--border);font-size:12.5px">
+    {% if alerts_on %}
+      Push notifications are on. This page stays the full picture — the alerts only
+      cover deals scoring 45+.
+    {% else %}
+      No push notifications configured, and none are needed: this page marks
+      anything found since you last hit <em>Mark all as seen</em>. To be told
+      without opening it, subscribe to <a href="/feed.xml">the RSS feed</a> in any
+      reader, or set <code>SCOUT_DISCORD_WEBHOOK_URL</code> in <code>.env</code>.
+    {% endif %}
+  </div>
 </section>
 {% endif %}
 {% endblock %}
