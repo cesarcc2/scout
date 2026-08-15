@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import csv
 import io
+import re
 from dataclasses import asdict
 from pathlib import Path
 
@@ -14,6 +15,7 @@ from ..alerts import notify
 from ..config import settings
 from ..db import query
 from ..normalize import catalog as catalog_mod
+from ..normalize import editor
 from ..normalize.run import PROMPT_TEMPLATE, normalize_category
 from ..pricing import retail
 from ..pricing.compare import compare
@@ -305,10 +307,21 @@ def search_page(request: Request, q: str = "", pages: int = 2,
 # --------------------------------------------------------------------------
 
 @app.get("/catalog", response_class=HTMLResponse)
-def catalog_page(request: Request, category: str | None = None):
+def catalog_page(request: Request, category: str | None = None,
+                 file: str = "", tab: str = "products", edit: str = "",
+                 saved: str = "", error: str = ""):
     category = category or _default_category()
-    cat = catalog_mod.get(category)
-    rows = query(
+    filename = file or editor.file_for_category(category) or ""
+    files = editor.list_files()
+    if not filename and files:
+        filename = files[0]["name"]
+
+    text = editor.read_text(filename) if filename else ""
+    validation = editor.validate_text(text) if text else None
+    parsed = (validation.parsed if validation else None) or {}
+    cat = catalog_mod.load_all().get(category)
+
+    unmatched = query(
         """
         SELECT title_hash, sample_title, occurrences, first_seen, last_seen
         FROM unmatched_title WHERE category = %s AND NOT resolved
@@ -319,16 +332,179 @@ def catalog_page(request: Request, category: str | None = None):
     buf = io.StringIO()
     writer = csv.writer(buf)
     writer.writerow(["title", "occurrences"])
-    for r in rows:
+    for r in unmatched:
         writer.writerow([r["sample_title"], r["occurrences"]])
+
+    # Live counts per product, so the products table shows what each rule is
+    # actually doing rather than just what it claims.
+    counts = {
+        r["product_id"]: r["n"] for r in query(
+            "SELECT product_id, COUNT(*) AS n FROM normalized "
+            "WHERE category = %s AND product_id IS NOT NULL GROUP BY product_id",
+            (category,),
+        )
+    }
+
+    editing = None
+    if edit:
+        editing = next((p for p in (parsed.get("products") or [])
+                        if p.get("id") == edit), None)
 
     return templates.TemplateResponse(
         request, "catalog.html",
-        {"page": "catalog", "category": category, "catalog": cat, "rows": rows,
-         "prompt": PROMPT_TEMPLATE.format(category=category),
-         "csv": buf.getvalue(),
-         "deep_terms": len(pipeline.deep_terms(category))},
+        {
+            "page": "catalog", "category": category, "catalog": cat,
+            "filename": filename, "files": files, "tab": tab,
+            "raw_text": text,
+            "validation": validation,
+            "parsed": parsed,
+            "products": parsed.get("products") or [],
+            "modifiers": parsed.get("modifiers") or [],
+            "query_terms": parsed.get("query_terms") or [],
+            "attributes": parsed.get("attributes") or {},
+            "counts": counts,
+            "editing": editing,
+            "backups": editor.list_backups(filename) if filename else [],
+            "writable": next((f["writable"] for f in files
+                              if f["name"] == filename), False),
+            "load_errors": catalog_mod.LOAD_ERRORS,
+            "rows": unmatched,
+            "prompt": PROMPT_TEMPLATE.format(category=category),
+            "csv": buf.getvalue(),
+            "deep_terms": len(pipeline.deep_terms(category)) if cat else 0,
+            "saved": saved, "error": error,
+        },
     )
+
+
+def _catalog_redirect(filename: str, tab: str = "products", **params) -> RedirectResponse:
+    from urllib.parse import urlencode
+
+    query_params = {"file": filename, "tab": tab, **{k: v for k, v in params.items() if v}}
+    return RedirectResponse(f"/catalog?{urlencode(query_params)}", status_code=303)
+
+
+@app.post("/catalog/raw")
+def catalog_save_raw(file: str = Form(...), text: str = Form(...)):
+    """Save the raw YAML. Refuses to write anything that would not load."""
+    result = editor.save_text(file, text)
+    if not result.ok:
+        # Hand the rejected text back so the edit is not lost.
+        _REJECTED[file] = text
+        return _catalog_redirect(file, "raw",
+                                 error="; ".join(c.message for c in result.errors))
+    _REJECTED.pop(file, None)
+    return _catalog_redirect(file, "raw", saved="Saved and reloaded.")
+
+
+# Text that failed validation, kept so a rejected save does not lose the edit.
+_REJECTED: dict[str, str] = {}
+
+
+@app.post("/catalog/product")
+def catalog_upsert_product(
+    file: str = Form(...),
+    id: str = Form(...),
+    label: str = Form(""),
+    brand: str = Form(""),
+    match_all: str = Form(""),
+    match_any: str = Form(""),
+    match_none: str = Form(""),
+    aliases: str = Form(""),
+    attributes: str = Form(""),
+    retail_fallback_eur: str = Form(""),
+):
+    def split(value: str) -> list[str]:
+        return [t.strip() for t in re.split(r"[,\n]", value) if t.strip()]
+
+    attrs: dict[str, float] = {}
+    for pair in split(attributes):
+        if ":" not in pair:
+            continue
+        key, _, val = pair.partition(":")
+        try:
+            attrs[key.strip()] = float(val.strip())
+        except ValueError:
+            continue
+
+    product = {
+        "id": re.sub(r"[^a-z0-9_]+", "_", id.strip().lower()).strip("_"),
+        "label": label.strip() or id.strip(),
+        "brand": brand.strip(),
+        "attributes": attrs,
+        "retail_fallback_eur": retail_fallback_eur.strip() or None,
+        "match": {"all": split(match_all), "any_of": split(match_any),
+                  "none_of": split(match_none)},
+        "aliases": split(aliases),
+    }
+    if not product["id"]:
+        return _catalog_redirect(file, "products", error="A product needs an id.")
+
+    try:
+        updated = editor.upsert_product(editor.read_text(file), product)
+    except Exception as exc:
+        return _catalog_redirect(file, "products", error=str(exc))
+
+    result = editor.save_text(file, updated)
+    if not result.ok:
+        return _catalog_redirect(file, "products",
+                                 error="; ".join(c.message for c in result.errors))
+    return _catalog_redirect(file, "products",
+                             saved=f"Saved {product['id']}. Reclassify to apply it "
+                                   f"to listings already collected.")
+
+
+@app.post("/catalog/product/delete")
+def catalog_delete_product(file: str = Form(...), id: str = Form(...)):
+    try:
+        updated = editor.delete_product(editor.read_text(file), id)
+    except Exception as exc:
+        return _catalog_redirect(file, "products", error=str(exc))
+    result = editor.save_text(file, updated)
+    if not result.ok:
+        return _catalog_redirect(file, "products",
+                                 error="; ".join(c.message for c in result.errors))
+    return _catalog_redirect(file, "products", saved=f"Removed {id}.")
+
+
+@app.post("/catalog/new")
+def catalog_new(name: str = Form(...), label: str = Form("")):
+    try:
+        filename = editor.create_category(name, label)
+    except Exception as exc:
+        return _catalog_redirect("", "files", error=str(exc))
+    return _catalog_redirect(filename, "raw", saved=f"Created {filename}.")
+
+
+@app.post("/catalog/restore")
+def catalog_restore(backup: str = Form(...)):
+    try:
+        filename = editor.restore_backup(backup)
+    except Exception as exc:
+        return _catalog_redirect("", "backups", error=str(exc))
+    catalog_mod.reload()
+    return _catalog_redirect(filename, "backups", saved=f"Restored {backup}.")
+
+
+@app.get("/api/catalog/preview")
+def catalog_preview_rule(category: str = "gpu", all_of: str = "", any_of: str = "",
+                         none_of: str = "", product_id: str = ""):
+    """Dry-run a match rule against listings already collected."""
+    def split(value: str) -> list[str]:
+        return [t.strip() for t in re.split(r"[,\n]", value) if t.strip()]
+
+    preview = editor.preview_rule(
+        category, split(all_of), split(any_of), split(none_of),
+        product_id=product_id or None,
+    )
+    return asdict(preview)
+
+
+@app.get("/api/catalog/validate")
+def catalog_validate(file: str, text: str = ""):
+    source = text or editor.read_text(file)
+    v = editor.validate_text(source)
+    return {"ok": v.ok, "checks": [asdict(c) for c in v.checks]}
 
 
 @app.post("/catalog/dismiss")
@@ -339,7 +515,7 @@ def catalog_dismiss(title_hash: str = Form(...), category: str = Form("")):
         "WHERE category = %s AND title_hash = %s RETURNING 1",
         (category, title_hash),
     )
-    return RedirectResponse("/catalog", status_code=303)
+    return RedirectResponse("/catalog?tab=unmatched", status_code=303)
 
 
 # --------------------------------------------------------------------------

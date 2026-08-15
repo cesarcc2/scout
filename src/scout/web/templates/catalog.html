@@ -2,77 +2,377 @@
 {% block title %}Catalog · Scout{% endblock %}
 {% block body %}
 
+{% if load_errors %}
+<section class="panel" style="border-color:var(--status-critical)">
+  <h2 style="color:var(--status-critical)">Catalog file failed to load</h2>
+  <div class="pad">
+    {% for fname, err in load_errors.items() %}
+      <p><b>{{ fname }}</b> — <code>{{ err }}</code></p>
+    {% endfor %}
+    <p class="muted">That category is unavailable until the file parses. Fix it in
+      the <a href="/catalog?file={{ load_errors.keys()|list|first }}&tab=raw">raw editor</a>,
+      or restore a backup. Everything else keeps working.</p>
+  </div>
+</section>
+{% endif %}
+
+{% if saved %}<section class="panel" style="border-color:var(--status-good)">
+  <div class="pad"><b>Saved.</b> {{ saved }}
+    <form method="post" action="/jobs/normalize" style="display:inline;margin-left:10px">
+      <button type="submit">Reclassify all listings now</button>
+    </form>
+  </div></section>{% endif %}
+{% if error %}<section class="panel" style="border-color:var(--status-critical)">
+  <div class="pad"><b style="color:var(--status-critical)">Not saved.</b> {{ error }}</div>
+</section>{% endif %}
+
 <section class="panel">
-  <h2>Unrecognised titles
-    <span class="rhs muted">{{ rows|length }} distinct phrasings the matcher couldn't classify</span>
+  <h2>
+    Catalog
+    <span class="rhs">
+      <form method="get" action="/catalog" style="display:inline-flex;gap:8px;align-items:center">
+        <select name="file" onchange="this.form.submit()">
+          {% for f in files %}
+          <option value="{{ f.name }}" {{ 'selected' if f.name == filename }}>{{ f.name }}</option>
+          {% endfor %}
+        </select>
+        <input type="hidden" name="tab" value="{{ tab }}">
+      </form>
+      {% if not writable %}<span class="tag warn">read-only mount</span>{% endif %}
+    </span>
   </h2>
+
+  <div class="tabs">
+    {% for key, lbl in [('products','Products'),('modifiers','Modifiers'),
+                        ('terms','Search terms'),('raw','Raw YAML'),
+                        ('unmatched','Unmatched'),('backups','Backups'),
+                        ('files','Files')] %}
+      <a href="/catalog?file={{ filename }}&tab={{ key }}"
+         class="{{ 'on' if tab == key }}">{{ lbl }}{% if key == 'unmatched' and rows %} ({{ rows|length }}){% endif %}</a>
+    {% endfor %}
+  </div>
+
+  {% if not writable %}
+  <div class="pad" style="border-bottom:1px solid var(--border);font-size:12.5px">
+    <b>Saving is disabled</b> because <code>catalogs/</code> is mounted read-only.
+    In <code>docker-compose.yml</code> change
+    <code>./catalogs:/app/catalogs:ro</code> to <code>./catalogs:/app/catalogs</code>
+    and run <code>docker compose up -d</code>.
+  </div>
+  {% endif %}
+
+  {% if validation and (validation.errors or validation.warnings) %}
+  <div class="pad" style="border-bottom:1px solid var(--border)">
+    {% for c in validation.errors %}
+      <div class="check err"><b>Error</b> {{ c.message }}
+        {% if c.where %}<span class="muted">— {{ c.where }}</span>{% endif %}</div>
+    {% endfor %}
+    {% for c in validation.warnings %}
+      <div class="check warn"><b>Warning</b> {{ c.message }}
+        {% if c.where %}<span class="muted">— {{ c.where }}</span>{% endif %}</div>
+    {% endfor %}
+  </div>
+  {% endif %}
+
+{# ------------------------------------------------------------------ #}
+{% if tab == 'products' %}
+  <table>
+    <thead><tr>
+      <th>Product</th><th>Must contain</th><th>Must not contain</th>
+      <th class="num">Listings</th><th></th>
+    </tr></thead>
+    <tbody>
+    {% for p in products %}
+      <tr>
+        <td><b>{{ p.label or p.id }}</b><br><code>{{ p.id }}</code>
+          {% if p.brand %}<span class="tag">{{ p.brand }}</span>{% endif %}
+          {% for k, v in (p.attributes or {}).items() %}
+            <span class="tag">{{ k }} {{ v }}</span>{% endfor %}
+        </td>
+        <td>{% for t in (p.match or {}).get('all', []) %}<code>{{ t }}</code> {% endfor %}
+          {% if (p.match or {}).get('any_of') %}<br><span class="muted">any of:</span>
+            {% for t in p.match.any_of %}<code>{{ t }}</code> {% endfor %}{% endif %}</td>
+        <td>{% for t in (p.match or {}).get('none_of', []) %}<code>{{ t }}</code> {% endfor %}</td>
+        <td class="num">{{ counts.get(p.id, 0) }}</td>
+        <td class="num" style="white-space:nowrap">
+          <a href="/catalog?file={{ filename }}&tab=products&edit={{ p.id }}">Edit</a>
+          {% if writable %}
+          <form method="post" action="/catalog/product/delete" style="display:inline"
+                onsubmit="return confirm('Remove {{ p.id }} from the catalog? Collected listings keep their history; they just stop being classified as this product.')">
+            <input type="hidden" name="file" value="{{ filename }}">
+            <input type="hidden" name="id" value="{{ p.id }}">
+            <button type="submit">Delete</button>
+          </form>
+          {% endif %}
+        </td>
+      </tr>
+    {% else %}
+      <tr><td colspan="5" class="muted" style="padding:24px;text-align:center">
+        No products yet. Add one below.</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+
+  {% if writable %}
+  <div class="pad" style="border-top:1px solid var(--border)">
+    <h3 style="margin:0 0 12px;font-size:14px">
+      {{ 'Edit ' + editing.id if editing else 'Add a product' }}</h3>
+    <form method="post" action="/catalog/product" id="pform">
+      <input type="hidden" name="file" value="{{ filename }}">
+      <div class="formgrid">
+        <div class="field"><label for="p-id">Id (permanent key)</label>
+          <input id="p-id" name="id" required value="{{ editing.id if editing else '' }}"
+                 placeholder="rtx_5070_ti" {{ 'readonly' if editing }}></div>
+        <div class="field"><label for="p-label">Label</label>
+          <input id="p-label" name="label" value="{{ editing.label if editing else '' }}"
+                 placeholder="GeForce RTX 5070 Ti"></div>
+        <div class="field"><label for="p-brand">Brand</label>
+          <input id="p-brand" name="brand" value="{{ editing.brand if editing else '' }}"
+                 placeholder="nvidia"></div>
+        <div class="field"><label for="p-retail">Retail fallback €</label>
+          <input id="p-retail" name="retail_fallback_eur" type="number" step="1"
+                 value="{{ editing.retail_fallback_eur if editing else '' }}"></div>
+      </div>
+      <div class="formgrid">
+        <div class="field"><label for="p-all">Must contain <span class="muted">(comma separated)</span></label>
+          <input id="p-all" name="match_all" placeholder="5070, ti"
+                 value="{{ (editing.match or {}).get('all', [])|join(', ') if editing else '' }}"></div>
+        <div class="field"><label for="p-any">At least one of</label>
+          <input id="p-any" name="match_any" placeholder="16gb"
+                 value="{{ (editing.match or {}).get('any_of', [])|join(', ') if editing else '' }}"></div>
+        <div class="field"><label for="p-none">Must not contain</label>
+          <input id="p-none" name="match_none" placeholder="super, laptop"
+                 value="{{ (editing.match or {}).get('none_of', [])|join(', ') if editing else '' }}"></div>
+      </div>
+      <div class="formgrid">
+        <div class="field"><label for="p-alias">Aliases <span class="muted">(fuzzy fallback)</span></label>
+          <input id="p-alias" name="aliases" placeholder="5070ti, rtx5070ti"
+                 value="{{ editing.aliases|join(', ') if editing and editing.aliases else '' }}"></div>
+        <div class="field"><label for="p-attrs">Attributes <span class="muted">(key: value, …)</span></label>
+          <input id="p-attrs" name="attributes" placeholder="perf_index: 100, vram_gb: 16"
+                 value="{% if editing %}{% for k, v in (editing.attributes or {}).items() %}{{ k }}: {{ v }}{{ ', ' if not loop.last }}{% endfor %}{% endif %}"></div>
+      </div>
+      <div style="display:flex;gap:10px;align-items:center;margin-top:14px;flex-wrap:wrap">
+        <button type="button" onclick="testRule()">Test this rule</button>
+        <button class="primary" type="submit">{{ 'Save changes' if editing else 'Add product' }}</button>
+        {% if editing %}<a href="/catalog?file={{ filename }}&tab=products">Cancel</a>{% endif %}
+        <span class="muted" style="font-size:12.5px">Tokens are matched on the
+          normalized title — lowercase, accents stripped, <code>5070ti</code> split
+          into <code>5070 ti</code>.</span>
+      </div>
+    </form>
+    <div id="preview" style="margin-top:14px"></div>
+  </div>
+  {% endif %}
+
+{# ------------------------------------------------------------------ #}
+{% elif tab == 'modifiers' %}
+  <table>
+    <thead><tr><th>Id</th><th>Effect</th><th>Patterns</th><th>Note</th></tr></thead>
+    <tbody>
+    {% for m in modifiers %}
+      <tr>
+        <td><code>{{ m.id }}</code></td>
+        <td>{% if m.exclude %}<span class="tag warn">excludes the listing</span>
+            {% elif m.price_adjust_pct %}
+              <span class="tag">price {{ '%+g'|format(m.price_adjust_pct) }}%</span>
+            {% else %}<span class="muted">none</span>{% endif %}</td>
+        <td>{% for p in m.patterns or [] %}<code>{{ p }}</code><br>{% endfor %}</td>
+        <td class="muted">{{ m.note or '' }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  <div class="pad muted" style="border-top:1px solid var(--border);font-size:12.5px">
+    Modifiers are regex, so they are edited in the
+    <a href="/catalog?file={{ filename }}&tab=raw">raw YAML</a> — a form would only
+    get in the way. Negative percentages mean the listing is worth more than its
+    asking price suggests (warranty, sealed), so the price is shaved down before
+    it is compared with bare units.
+  </div>
+
+{# ------------------------------------------------------------------ #}
+{% elif tab == 'terms' %}
+  <div class="pad">
+    <p class="muted" style="margin-top:0">These are the broad searches the quick
+      cycle runs. The full sweep additionally queries every product by name
+      ({{ deep_terms }} terms in total).</p>
+    <div>{% for t in query_terms %}<span class="tag">{{ t }}</span>{% endfor %}</div>
+    <p class="muted" style="font-size:12.5px;margin-bottom:0">
+      Each term costs a round of requests every cycle. Edit them in the
+      <a href="/catalog?file={{ filename }}&tab=raw">raw YAML</a>.</p>
+  </div>
+
+{# ------------------------------------------------------------------ #}
+{% elif tab == 'raw' %}
+  <form method="post" action="/catalog/raw">
+    <input type="hidden" name="file" value="{{ filename }}">
+    <div class="pad" style="padding-bottom:0">
+      <textarea name="text" id="rawtext" spellcheck="false"
+                {{ 'readonly' if not writable }}>{{ raw_text }}</textarea>
+    </div>
+    <div class="pad" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+      <button type="button" onclick="validateRaw()">Check without saving</button>
+      {% if writable %}<button class="primary" type="submit">Save</button>{% endif %}
+      <span class="muted" style="font-size:12.5px">Every save is validated first and
+        backed up — a file that would not load is never written.</span>
+    </div>
+  </form>
+  <div id="rawchecks" class="pad" style="padding-top:0"></div>
+
+{# ------------------------------------------------------------------ #}
+{% elif tab == 'unmatched' %}
   <div class="pad muted" style="font-size:13px;border-bottom:1px solid var(--border)">
-    This is the only part of the system where a language model helps. Copy the prompt
-    below plus these titles into a Claude chat, paste the YAML it returns into
-    <code>catalogs/{{ category }}.yaml</code>, then hit <a href="/status">Reclassify everything</a>.
-    Roughly a once-a-month job — everything else runs without a single model call.
+    Titles the matcher could not classify, most frequent first. Add a rule for the
+    ones worth having; dismiss the rest. If a batch is easier to hand to a model,
+    copy the prompt below into a chat and paste the YAML it returns into the raw
+    editor.
   </div>
   {% if rows %}
   <table>
-    <thead><tr><th>Title</th><th class="num">Seen</th><th class="num">Last seen</th><th></th></tr></thead>
+    <thead><tr><th>Title</th><th class="num">Seen</th><th class="num">Last</th><th></th></tr></thead>
     <tbody>
     {% for r in rows %}
       <tr>
         <td>{{ r.sample_title }}</td>
         <td class="num">{{ r.occurrences }}</td>
         <td class="num muted">{{ r.last_seen.strftime('%d %b') }}</td>
-        <td class="num">
+        <td class="num" style="white-space:nowrap">
+          <a href="/catalog?file={{ filename }}&tab=products">Add rule</a>
           <form method="post" action="/catalog/dismiss" style="display:inline">
             <input type="hidden" name="title_hash" value="{{ r.title_hash }}">
-            <button type="submit" title="Not a product I care about">Dismiss</button>
+            <button type="submit">Dismiss</button>
           </form>
         </td>
       </tr>
     {% endfor %}
     </tbody>
   </table>
-  {% else %}
-  <div class="empty">
-    <h3>Nothing unrecognised</h3>
-    <p>Every listing the collector found matched a catalog rule or was deliberately filtered out.</p>
+  <div class="pad" style="border-top:1px solid var(--border)">
+    <button onclick="copyPrompt()">Copy prompt + titles</button>
+    <pre id="prompt" style="margin-top:12px;max-height:260px">{{ prompt }}
+
+{{ csv }}</pre>
   </div>
+  {% else %}
+  <div class="empty"><h3>Nothing unrecognised</h3>
+    <p>Every listing matched a rule or was deliberately filtered out.</p></div>
   {% endif %}
-</section>
 
-{% if rows %}
-<section class="panel">
-  <h2>Prompt
-    <span class="rhs"><button onclick="copyAll()">Copy prompt + titles</button></span>
-  </h2>
-  <div class="pad"><pre id="prompt">{{ prompt }}
-
-{{ csv }}</pre></div>
-</section>
-{% endif %}
-
-<section class="panel">
-  <h2>Catalog in use</h2>
-  <table class="mini">
+{# ------------------------------------------------------------------ #}
+{% elif tab == 'backups' %}
+  <table>
+    <thead><tr><th>Backup</th><th class="num">Size</th><th class="num">Saved</th><th></th></tr></thead>
     <tbody>
-      <tr><td>File</td><td class="num"><code>catalogs/{{ category }}.yaml</code></td></tr>
-      <tr><td>Version hash</td><td class="num"><code>{{ catalog.version }}</code></td></tr>
-      <tr><td>Products</td><td class="num">{{ catalog.products|length }}</td></tr>
-      <tr><td>Exclusion rules</td><td class="num">{{ catalog.exclusions|length }}</td></tr>
-      <tr><td>Price modifiers</td><td class="num">{{ catalog.adjusters|length }}</td></tr>
-      <tr><td>Search terms</td><td class="num">{{ catalog.query_terms|length }} broad · {{ deep_terms }} deep</td></tr>
+    {% for b in backups %}
+      <tr>
+        <td><code>{{ b.name }}</code></td>
+        <td class="num">{{ b.bytes }} B</td>
+        <td class="num muted">{{ b.saved.strftime('%d %b %H:%M') }} UTC</td>
+        <td class="num">
+          {% if writable %}
+          <form method="post" action="/catalog/restore" style="display:inline"
+                onsubmit="return confirm('Restore this version over {{ filename }}? The current file is backed up first.')">
+            <input type="hidden" name="backup" value="{{ b.name }}">
+            <button type="submit">Restore</button>
+          </form>
+          {% endif %}
+        </td>
+      </tr>
+    {% else %}
+      <tr><td colspan="4" class="muted" style="padding:24px;text-align:center">
+        No backups yet — one is written before every save.</td></tr>
+    {% endfor %}
     </tbody>
   </table>
+
+{# ------------------------------------------------------------------ #}
+{% elif tab == 'files' %}
+  <table>
+    <thead><tr><th>File</th><th class="num">Size</th><th class="num">Modified</th><th></th></tr></thead>
+    <tbody>
+    {% for f in files %}
+      <tr>
+        <td><code>{{ f.name }}</code>
+          {% if not f.writable %}<span class="tag warn">read-only</span>{% endif %}</td>
+        <td class="num">{{ f.bytes }} B</td>
+        <td class="num muted">{{ f.modified.strftime('%d %b %H:%M') }} UTC</td>
+        <td class="num"><a href="/catalog?file={{ f.name }}&tab=raw">Open</a></td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  <div class="pad" style="border-top:1px solid var(--border)">
+    <h3 style="margin:0 0 10px;font-size:14px">New category</h3>
+    <p class="muted" style="font-size:12.5px;margin-top:0">Nothing in the code knows
+      what a GPU is. Add <code>bikes.yaml</code> and the whole pipeline works on bikes.</p>
+    <form method="post" action="/catalog/new" style="display:flex;gap:10px;flex-wrap:wrap">
+      <input name="name" placeholder="bikes" required>
+      <input name="label" placeholder="Bicycles">
+      <button class="primary" type="submit">Create</button>
+    </form>
+  </div>
+{% endif %}
 </section>
 {% endblock %}
 
 {% block scripts %}
 <script>
-function copyAll(){
-  const text = document.getElementById('prompt').innerText;
-  navigator.clipboard.writeText(text).then(() => {
-    const b = document.querySelector('.rhs button');
-    b.textContent = 'Copied'; setTimeout(() => b.textContent = 'Copy prompt + titles', 1800);
+function copyPrompt(){
+  navigator.clipboard.writeText(document.getElementById('prompt').innerText);
+}
+
+async function validateRaw(){
+  const box = document.getElementById('rawchecks');
+  box.innerHTML = '<span class="muted">Checking…</span>';
+  const body = new URLSearchParams({file: '{{ filename }}',
+                                    text: document.getElementById('rawtext').value});
+  const r = await fetch('/api/catalog/validate?' + body.toString());
+  const j = await r.json();
+  if (!j.checks.length) { box.innerHTML = '<div class="check ok">Looks good.</div>'; return; }
+  box.innerHTML = j.checks.map(c =>
+    `<div class="check ${c.level === 'error' ? 'err' : c.level === 'warning' ? 'warn' : 'ok'}">` +
+    `<b>${c.level}</b> ${c.message}` +
+    (c.where ? ` <span class="muted">— ${c.where}</span>` : '') + '</div>').join('');
+}
+
+async function testRule(){
+  const box = document.getElementById('preview');
+  const f = document.getElementById('pform');
+  box.innerHTML = '<span class="muted">Scanning listings you have already collected…</span>';
+  const params = new URLSearchParams({
+    category: '{{ category }}',
+    all_of: f.match_all.value, any_of: f.match_any.value,
+    none_of: f.match_none.value, product_id: f.id.value,
   });
+  const j = await (await fetch('/api/catalog/preview?' + params.toString())).json();
+
+  if (!j.matched) {
+    box.innerHTML = `<div class="check warn"><b>No matches</b> among ${j.scanned}
+      classified listings. Either the tokens are wrong, or you have not collected
+      any of this product yet.</div>`;
+    return;
+  }
+  let html = `<div class="check ok"><b>${j.matched} matches</b> out of ${j.scanned}
+    listings scanned.</div>`;
+  if (j.steals.length) {
+    html += `<div class="check err"><b>${j.steals.length}+ would be taken from another
+      product.</b> That is how a distribution gets silently corrupted — add the
+      distinguishing token to <em>Must not contain</em>.</div>`;
+    html += '<table class="mini"><thead><tr><th>Listing</th><th>Currently</th>' +
+            '<th class="num">Price</th></tr></thead><tbody>' +
+      j.steals.map(s => `<tr><td>${s.title}</td><td><code>${s.current}</code></td>` +
+        `<td class="num">€${s.price_eur.toFixed(0)}</td></tr>`).join('') +
+      '</tbody></table>';
+  }
+  if (j.samples.length) {
+    html += '<table class="mini"><thead><tr><th>Would match</th>' +
+            '<th class="num">Price</th></tr></thead><tbody>' +
+      j.samples.map(s => `<tr><td>${s.title}</td>` +
+        `<td class="num">€${s.price_eur.toFixed(0)}</td></tr>`).join('') +
+      '</tbody></table>';
+  }
+  box.innerHTML = html;
 }
 </script>
 {% endblock %}

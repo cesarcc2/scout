@@ -132,6 +132,29 @@ svg.meter,svg.spark{display:block}
 .tableview{margin-top:12px}
 .tableview summary{cursor:pointer;color:var(--muted);font-size:12px}
 
+/* ---- catalog editor ---- */
+.tabs{display:flex;gap:2px;padding:0 16px;border-bottom:1px solid var(--border);
+  flex-wrap:wrap;background:var(--plane)}
+.tabs a{padding:10px 12px;color:var(--ink-2);font-size:13px;font-weight:500;
+  border-bottom:2px solid transparent;margin-bottom:-1px}
+.tabs a:hover{color:var(--ink);text-decoration:none}
+.tabs a.on{color:var(--ink);border-bottom-color:var(--series-1);font-weight:650}
+textarea{width:100%;min-height:460px;font:12.5px/1.55 ui-monospace,"SF Mono",
+  Menlo,Consolas,monospace;background:var(--plane);color:var(--ink);
+  border:1px solid var(--baseline);border-radius:8px;padding:12px;resize:vertical;
+  tab-size:2;white-space:pre}
+textarea:focus{outline:2px solid var(--series-1);outline-offset:-1px}
+.formgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));
+  gap:12px;margin-bottom:10px}
+.formgrid .field input{width:100%}
+.check{padding:8px 11px;border-radius:7px;margin-bottom:6px;font-size:13px;
+  border-left:3px solid var(--baseline);background:var(--plane)}
+.check b{text-transform:uppercase;font-size:11px;letter-spacing:.05em;
+  margin-right:6px}
+.check.err{border-left-color:var(--status-critical)}
+.check.warn{border-left-color:var(--status-warning)}
+.check.ok{border-left-color:var(--status-good)}
+
 /* ---- misc ---- */
 .empty{padding:44px 20px;text-align:center;color:var(--muted)}
 .empty h3{color:var(--ink);margin:0 0 6px;font-size:16px}

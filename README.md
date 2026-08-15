@@ -111,7 +111,7 @@ After that the scheduler keeps it current: a quick cycle every 45 minutes
 | **Product detail** | Price histogram, the p25/median markers, and every live listing ranked |
 | **Compare** | Cost per point of performance, with min-VRAM and max-TDP filters |
 | **Live search** | Type anything, fetch OLX right now, get it priced against the catalog immediately |
-| **Catalog** | The unrecognised titles plus a copy-paste prompt — the monthly AI chore |
+| **Catalog** | Edit the YAML files in the browser — products, rules, backups, unmatched titles |
 | **Status** | Coverage, collection stats, and buttons to run any job with live progress |
 | **`/feed.xml`** | RSS of current deals — notifications with zero configuration |
 
@@ -204,10 +204,49 @@ isn't needed for the system to be useful.
 
 ---
 
-## Adding a category
+## Editing the catalog
 
-Nothing in `src/` knows what a GPU is. Drop `catalogs/bikes.yaml` in, restart,
-and the whole pipeline works on bikes. See `catalogs/README.md` for the format.
+The Catalog page edits `catalogs/*.yaml` in place. Tabs: **Products** (a table
+of every rule with its live listing count, plus add/edit/delete), **Modifiers**,
+**Search terms**, **Raw YAML**, **Unmatched**, **Backups**, **Files**.
+
+Four things make this safe enough to use on the file that can silently ruin
+every price distribution you have:
+
+- **Nothing invalid is ever written.** A save is parsed, structurally checked,
+  and then loaded through the real production loader. If any of that fails the
+  file on disk is untouched and the editor tells you why, with a line number.
+- **Every save is backed up** to `catalogs/.backups/`, and restoring is itself
+  backed up. Twenty versions are kept.
+- **Comments survive.** Structured edits splice the YAML text rather than
+  re-serialising it — a PyYAML round-trip would strip every comment in the file,
+  and the comments are where the reasoning lives.
+- **The swallowing lint.** If one product requires `["5080"]` and another
+  requires `["5080", "super"]`, the first will eat the second's listings unless
+  it excludes `super`. That corrupts two price histories and raises no error
+  anywhere, so the editor refuses to save it and tells you exactly which
+  `none_of` token is missing.
+
+**Test this rule** dry-runs a rule against listings you have already collected
+before you save it: how many it would match, and — the important part — which
+listings it would take from which other product.
+
+Changing a catalog only affects future classification until you press
+**Reclassify all listings now**, which re-runs the matcher over your entire
+history.
+
+### Adding a category
+
+Nothing in `src/` knows what a GPU is. **Files → New category** writes a
+commented starter file; add `bikes.yaml` and the whole pipeline works on bikes.
+See `catalogs/README.md` for the format.
+
+A file that fails to parse costs you that one category, not the app — the
+dashboard keeps working and shows the error on the Catalog page.
+
+**Note:** `catalogs/` must be mounted read-write for any of this. The shipped
+`docker-compose.yml` does that; if you mount it `:ro`, saving is greyed out and
+the page says so.
 
 The only category-specific work is the product list and the `perf_index`
 equivalent — whatever numeric attribute makes different products comparable.
@@ -300,7 +339,7 @@ thing that broke.
 
 ```bash
 python3.12 -m venv .venv && .venv/bin/pip install -r requirements-dev.txt
-PYTHONPATH=src .venv/bin/python -m pytest tests -q      # 83 tests, no DB needed
+PYTHONPATH=src .venv/bin/python -m pytest tests -q      # 107 tests, no DB needed
 
 # end-to-end against a real Postgres, with fabricated listings
 SCOUT_DSN=postgresql://scout:scout@localhost:5432/scout \
@@ -328,6 +367,7 @@ src/scout/
   normalize/text.py          title normalization
   normalize/matcher.py       rule + fuzzy matching, price adjustment
   normalize/run.py           batch classify, unmatched export + prompt
+  normalize/editor.py        catalog validation, linting, backups, safe writes
   pricing/stats.py           weighted percentiles, sold-proxy weighting
   pricing/retail.py          JSON-LD retail scraper, PT/ES shops
   pricing/deals.py           deal scoring with human-readable reasons

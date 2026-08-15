@@ -117,14 +117,39 @@ def _load_file(path: Path) -> Catalog:
     )
 
 
+# Files that failed to load, keyed by filename. Populated by load_all() and
+# surfaced on the Catalog page. Since catalogs are editable from the browser, a
+# broken file must degrade to "this one category is unavailable, here is why"
+# rather than taking the whole dashboard down with a 500.
+LOAD_ERRORS: dict[str, str] = {}
+
+
 @lru_cache(maxsize=None)
 def load_all(catalog_dir: str | None = None) -> dict[str, Catalog]:
     directory = Path(catalog_dir or settings.catalog_dir)
     catalogs: dict[str, Catalog] = {}
+    errors: dict[str, str] = {}
     for path in sorted(directory.glob("*.yaml")):
-        cat = _load_file(path)
+        try:
+            cat = _load_file(path)
+        except Exception as exc:
+            errors[path.name] = f"{type(exc).__name__}: {exc}"
+            continue
         catalogs[cat.category] = cat
+    LOAD_ERRORS.clear()
+    LOAD_ERRORS.update(errors)
     return catalogs
+
+
+def reload() -> dict[str, Catalog]:
+    """Drop the cache and re-read from disk.
+
+    Called after any edit made through the web UI — the catalog is cached for
+    speed, and an edit that isn't visible until a container restart would be
+    worse than no editor at all.
+    """
+    load_all.cache_clear()
+    return load_all()
 
 
 def get(category: str) -> Catalog:

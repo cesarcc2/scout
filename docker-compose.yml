@@ -24,7 +24,10 @@ services:
     environment:
       SCOUT_DSN: postgresql://scout:${POSTGRES_PASSWORD:-scout}@db:5432/scout
     volumes:
-      - ./catalogs:/app/catalogs:ro
+      # Read-write: the Catalog page edits these files in place, keeps backups
+      # under catalogs/.backups/, and reloads without a restart. Mount it :ro
+      # and the UI greys out saving and tells you why.
+      - ./catalogs:/app/catalogs
       - ./data:/app/data
     ports:
       - "8077:8077"
