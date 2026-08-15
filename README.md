@@ -269,11 +269,38 @@ cover the gap until real retail data arrives.
 
 ---
 
+## Dependencies
+
+`requirements.txt` is a **full lock** — every transitive dependency pinned, not
+just the direct ones. That is not fussiness. An earlier version pinned
+`typer==0.12.5` and left `click` free; a rebuild months later installed click
+8.4, which that Typer cannot drive, and the container died on startup with
+`TypeError: Secondary flag is not valid for non-boolean flag` before serving a
+single request. Every test still passed, because they ran against a different
+set of versions than the image built.
+
+`requirements.in` holds the loose ranges and is the source of truth for what
+Scout actually needs. To change a dependency:
+
+```bash
+python3.12 -m venv .venv
+.venv/bin/pip install -r requirements.in
+.venv/bin/pip freeze > requirements.txt
+.venv/bin/pip install pytest
+.venv/bin/python -m pytest tests -q        # in the venv, before shipping
+```
+
+The rule that matters: **run the suite inside a venv built from the lock**, not
+against whatever your machine happens to have. `tests/test_startup.py` exists to
+catch this class of failure — it asserts the Typer command group and the FastAPI
+routes can actually be constructed under the installed versions, which is the
+thing that broke.
+
 ## Tests
 
 ```bash
-pip install -r requirements.txt
-PYTHONPATH=src pytest tests -q                 # 60 unit tests, no DB needed
+python3.12 -m venv .venv && .venv/bin/pip install -r requirements-dev.txt
+PYTHONPATH=src .venv/bin/python -m pytest tests -q      # 83 tests, no DB needed
 
 # end-to-end against a real Postgres, with fabricated listings
 SCOUT_DSN=postgresql://scout:scout@localhost:5432/scout \
@@ -312,4 +339,8 @@ src/scout/
   web/templates/             the UI
   jobs.py                    one-slot background job runner
   scheduler.py               APScheduler loop
+
+requirements.in              loose ranges — what Scout depends on
+requirements.txt             the lock — what the image installs
+requirements-dev.txt         the lock plus pytest
 ```

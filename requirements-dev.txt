@@ -1,0 +1,3 @@
+# Dev-only. Install alongside requirements.txt to run the suite.
+-r requirements.txt
+pytest==9.0.1
