@@ -73,8 +73,13 @@ products:
 
 ## Attribute values
 
-`perf_index` values shipped in `gpu.yaml` are **approximations and must be
-verified before you trust the compare view.** Replace them with TechPowerUp's
-relative-performance percentages or your own 3DMark numbers — the ranking is
-only as good as this table. They are deliberately plain YAML so this is a
-two-minute job, and they change maybe twice a year.
+`perf_index` values in `gpu.yaml` are sourced from Tom's Hardware's 1440p-ultra
+rasterisation hierarchy (fetch date recorded in the file header) and rescaled so
+the RTX 5070 Ti = 100. `build_gpu_catalog.py` regenerates the file from that
+table, so the numbers stay auditable.
+
+A product with **no** `perf_index` is deliberate, not an oversight: it means the
+card is absent from the source table. It is still collected, priced and alerted
+on — it simply sits out the value ranking. Leave it that way rather than filling
+the gap with an estimate. A plausible-but-wrong benchmark silently reorders the
+entire compare view, and unlike a missing one, nothing about it looks wrong.

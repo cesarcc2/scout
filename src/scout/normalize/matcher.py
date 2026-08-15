@@ -80,10 +80,21 @@ def match(catalog: Catalog, title: str, description: str = "") -> MatchResult:
         result.kind = "rule"
         result.score = float(winner.match.specificity)
     else:
-        # 3. Fuzzy fallback against aliases.
+        # 3. Fuzzy fallback against aliases — but it must still honour the
+        #    product's own exclusions.
+        #
+        #    This was a hole straight through the system's central invariant.
+        #    "RTX 4070 laptop" is rejected by the rule (none_of: laptop), falls
+        #    through to here, and `token_set_ratio` happily scores it 100
+        #    against the alias "rtx4070" because that scorer ignores extra
+        #    tokens entirely. A laptop card worth a third of the price then
+        #    joined the desktop 4070 distribution, with no error anywhere.
         pid, score = _fuzzy_match(catalog, norm_title)
-        if pid:
-            result.product_id = pid
+        product = catalog.product(pid) if pid else None
+        if product and not any(
+            has_token(norm_title, toks, t) for t in product.match.none_of
+        ):
+            result.product_id = product.id
             result.kind = "fuzzy"
             result.score = score
 

@@ -2,28 +2,64 @@ category: gpu
 label: "Graphics cards"
 currency: EUR
 
+# ===========================================================================
+# DATA PROVENANCE — read this before trusting the compare view
+#
+#   perf_index  Tom's Hardware GPU benchmarks hierarchy, 1440p ultra
+#               rasterisation, fetched 2026-08-15, rescaled so RTX 5070 Ti =
+#               100. Source: https://www.tomshardware.com/reviews/gpu-hierarchy,4388.html
+#               Products with no perf_index are deliberately absent from that
+#               table; they are still tracked and alerted on, they just sit out
+#               the value ranking. Never invent a number to fill one in — a
+#               plausible-but-wrong benchmark is worse than none.
+#
+#   vram_gb     Manufacturer specification. Cross-checked against Wikipedia,
+#   tdp_w       which caught two errors in the hierarchy table (RTX 5090 listed
+#               as 24GB, RTX 5060 as 12GB).
+#
+#   retail_*    Estimate only: USD MSRP x 1.22, which is what Portuguese VAT
+#               plus margin worked out to on the one observed data point (RTX
+#               5070, $549 MSRP, listed at EUR 669.90 in PT). Zero for anything
+#               no longer sold new. The retail scraper overrides all of these
+#               as soon as it has real prices — these exist so "vs retail" is
+#               not blank on day one.
+#
+# Regenerate with build_gpu_catalog.py; do not hand-edit the numbers without
+# updating the source note.
+# ===========================================================================
+
 # Broad on purpose. The matcher does precision; the query only has to surface
-# the ad. OLX search is fuzzy and forgiving, so fewer/wider terms = fewer
-# requests = less chance of being rate-limited.
+# the ad. Every term costs a round of requests on every cycle, so widen rather
+# than lengthen this list.
 query_terms:
   - "rtx 5090"
   - "rtx 5080"
   - "rtx 5070"
+  - "rtx 5060"
   - "rtx 4090"
   - "rtx 4080"
   - "rtx 4070"
+  - "rtx 4060"
   - "rtx 3080"
   - "rtx 3070"
   - "rtx 3060"
+  - "rtx 2070"
+  - "rtx 2060"
+  - "gtx 1660"
+  - "gtx 1080"
   - "radeon 9070"
+  - "radeon 9060"
   - "radeon 7900"
   - "radeon 7800"
-  - "rx 6800"
+  - "rx 7600"
+  - "rx 6700"
+  - "rx 6600"
+  - "arc b580"
   - "placa grafica"
 
 attributes:
   perf_index:
-    label: "Relative performance (1440p raster, 5070 Ti = 100)"
+    label: "Relative performance (1440p ultra, RTX 5070 Ti = 100)"
     higher_is_better: true
   vram_gb:
     label: "VRAM (GB)"
@@ -34,326 +70,639 @@ attributes:
 
 rank_by: perf_index
 
+# ---------------------------------------------------------------------------
+# Modifiers run against the NORMALIZED title + description: lowercased, accents
+# stripped, punctuation removed, "5070ti" split into "5070 ti". Two consequences
+# worth remembering when editing these:
+#
+#   * A pattern containing "/" can never match. "c/ garantia" normalizes to
+#     "c garantia", so write it that way.
+#   * Portuguese negates with "sem X" / "nao tem X" / "s X". Without a guard,
+#     "sem garantia" (NO warranty) matches the warranty pattern and the listing
+#     gets an 8% discount for a feature it does not have. Every positive-value
+#     modifier below carries the guard.
+# ---------------------------------------------------------------------------
 modifiers:
   # ---- hard exclusions -------------------------------------------------
   - id: wanted_ad
-    patterns: ['^procuro\b', '^compro\b', '^pago\b', '^wanted\b', '^busco\b']
+    patterns: ['^procuro\b', '^compro\b', '^pago\b', '^wanted\b', '^busco\b',
+               '^troco\b', '^precisa[- ]se\b']
     exclude: true
     note: "Buyers, not sellers. These poison the price distribution badly."
 
   - id: faulty
     patterns:
       ['para pecas', 'para peca', 'avariad', 'nao funciona', 'nao liga',
-       'com defeito', 'defeituos', 'no funciona', 'averiad', 'sin funcionar',
-       'artefact', 'so para pecas']
+       'com defeito', 'defeituos', '\bno funciona', 'averiad', 'sin funcionar',
+       '(?<!sem )artefact', 'so para pecas', 'nao da imagem', 'para reparar',
+       'para arranjar']
     exclude: true
+    note: >-
+      The artefact guard matters: "sem artefactos" advertises a HEALTHY card,
+      and without the lookbehind it was being thrown away as broken.
 
   - id: whole_system
     patterns:
       ['pc completo', 'pc gaming completo', 'setup completo', 'torre completa',
-       'computador completo', 'equipo completo', 'ordenador completo']
+       'computador completo', 'equipo completo', 'ordenador completo',
+       'pc gamer completo']
     exclude: true
     note: "Full builds need part-out valuation. Out of scope for now."
 
   - id: mining_rig
-    patterns: ['rig de mineracao', 'mining rig', 'rig completo', 'lote de \d+']
+    patterns: ['rig de mineracao', 'mining rig', 'rig completo', 'lote de \d+',
+               '\d+ unidades', 'varias placas']
     exclude: true
 
-  - id: water_block_only
-    patterns: ['^waterblock', '^bloco de agua', 'apenas o cooler', 'so o cooler',
-               'backplate', 'suporte anti', 'suporte para placa']
+  - id: accessory_only
+    patterns: ['^waterblock', '^bloco de agua', '^backplate', '^suporte',
+               'apenas o cooler', 'so o cooler', 'apenas backplate',
+               'suporte anti sag', 'suporte para placa', '^cabo ', '^adaptador ']
     exclude: true
-    note: "Accessories that match GPU model names but are not GPUs."
+    note: >-
+      Accessories carrying a GPU model name. "backplate" is anchored on purpose
+      — plenty of genuine listings mention "com backplate" as a selling point,
+      and an unanchored pattern threw all of them away.
 
   # ---- price-normalizing modifiers -------------------------------------
-  # Negative pct = listing carries extra value, so shave it off the asking
+  # Negative pct = the listing carries extra value, so shave it off the asking
   # price to compare fairly against a bare unit.
   - id: warranty
-    patterns: ['garantia', 'garantida', 'warranty', 'c/ gar', 'ainda com gar',
-               'em garantia', 'con garantia']
+    patterns: ['(?<!sem )(?<!s )garantia', '(?<!sem )garantida', 'warranty',
+               '\bc garantia', 'ainda com gar', '\bem garantia',
+               'con garantia', 'garantia ate']
     price_adjust_pct: -8
 
   - id: invoice
-    patterns: ['fatura', 'factura', 'talao de compra', 'nota de compra',
-               'com recibo', 'con factura']
+    patterns: ['(?<!sem )fatura', '(?<!sem )factura', 'talao de compra',
+               'nota de compra', 'com recibo', 'con factura']
     price_adjust_pct: -3
 
   - id: sealed_new
     patterns: ['selad', 'novo por abrir', 'nunca usad', 'lacrad', 'precintad',
-               'a estrear', 'sem uso']
+               'a estrear', 'sem uso', 'novo na caixa']
     price_adjust_pct: -12
 
   - id: boxed
-    patterns: ['com caixa', 'na caixa', 'caixa original', 'con caja']
+    patterns: ['(?<!sem )com caixa', 'na caixa', '(?<!sem )caixa original',
+               'con caja']
     price_adjust_pct: -2
 
   - id: mined_on
-    patterns: ['usada para mineracao', 'minou', 'mineracao', 'mining',
-               'undervolt 24/7']
+    patterns: ['(?<!nunca )usada para mineracao', '(?<!nunca )minou',
+               '(?<!sem )(?<!nunca )mineracao', '(?<!nunca )mining',
+               'undervolt 24 7']
     price_adjust_pct: 10
+    note: >-
+      "nunca minou" is a very common selling point, so every pattern here is
+      guarded against it. Without the guard the card was penalised for the
+      opposite of what the seller wrote.
 
   - id: no_returns
     patterns: ['sem trocas', 'nao aceito trocas', 'nao troco', 'vendo como esta',
-               'sem garantia']
+               'sem garantia', 'nao aceito devolucoes']
     price_adjust_pct: 5
 
   - id: negotiable
-    patterns: ['negociavel', 'aceito propostas', 'melhor oferta', 'negociable']
+    patterns: ['negociavel', 'aceito propostas', 'melhor oferta', 'negociable',
+               'aberto a propostas']
     price_adjust_pct: -4
     note: "Asking price overstates the real clearing price."
 
 products:
-  # =========================== NVIDIA 50-series =========================
+  # ======================== NVIDIA Blackwell — RTX 50 ===============
   - id: rtx_5090
     label: "GeForce RTX 5090"
     brand: nvidia
-    attributes: {perf_index: 168, vram_gb: 32, tdp_w: 575}
-    retail_fallback_eur: 2349
-    match: {all: ["5090"], none_of: ["laptop", "portatil"]}
-    aliases: ["rtx5090", "rtx 5090"]
+    attributes: {perf_index: 143.3, vram_gb: 32, tdp_w: 575}
+    retail_fallback_eur: 2440
+    match: {all: ["5090"], none_of: ["laptop", "portatil", "notebook"]}
+    aliases: ["rtx5090"]
 
   - id: rtx_5080
     label: "GeForce RTX 5080"
     brand: nvidia
-    attributes: {perf_index: 123, vram_gb: 16, tdp_w: 360}
-    retail_fallback_eur: 1179
-    match: {all: ["5080"], none_of: ["laptop", "portatil", "super"]}
-    aliases: ["rtx5080", "rtx 5080"]
+    attributes: {perf_index: 109.9, vram_gb: 16, tdp_w: 360}
+    retail_fallback_eur: 1220
+    match: {all: ["5080"], none_of: ["super", "ti", "laptop", "portatil", "notebook"]}
+    aliases: ["rtx5080"]
 
   - id: rtx_5070_ti
     label: "GeForce RTX 5070 Ti"
     brand: nvidia
-    attributes: {perf_index: 100, vram_gb: 16, tdp_w: 300}
-    retail_fallback_eur: 879
-    match: {all: ["5070", "ti"], none_of: ["laptop", "portatil", "super"]}
-    aliases: ["5070ti", "rtx5070ti", "5070 ti"]
+    attributes: {perf_index: 100.0, vram_gb: 16, tdp_w: 300}
+    retail_fallback_eur: 910
+    match: {all: ["5070", "ti"], none_of: ["super", "laptop", "portatil", "notebook"]}
+    aliases: ["5070ti", "rtx5070ti"]
 
   - id: rtx_5070
     label: "GeForce RTX 5070"
     brand: nvidia
-    attributes: {perf_index: 80, vram_gb: 12, tdp_w: 250}
-    retail_fallback_eur: 649
-    match: {all: ["5070"], none_of: ["ti", "super", "laptop", "portatil"]}
-    aliases: ["rtx5070", "rtx 5070"]
+    attributes: {perf_index: 82.5, vram_gb: 12, tdp_w: 250}
+    retail_fallback_eur: 670
+    match: {all: ["5070"], none_of: ["ti", "super", "laptop", "portatil", "notebook"]}
+    aliases: ["rtx5070"]
 
   - id: rtx_5060_ti_16
     label: "GeForce RTX 5060 Ti 16GB"
     brand: nvidia
-    attributes: {perf_index: 63, vram_gb: 16, tdp_w: 180}
-    retail_fallback_eur: 449
-    match: {all: ["5060", "ti"], any_of: ["16gb", "16 gb"], none_of: ["laptop"]}
+    attributes: {perf_index: 62.9, vram_gb: 16, tdp_w: 180}
+    retail_fallback_eur: 520
+    match: {all: ["5060", "ti"], any_of: ["16gb"], none_of: ["laptop", "portatil", "notebook"]}
     aliases: ["5060ti 16gb"]
 
   - id: rtx_5060_ti_8
     label: "GeForce RTX 5060 Ti 8GB"
     brand: nvidia
-    attributes: {perf_index: 58, vram_gb: 8, tdp_w: 180}
-    retail_fallback_eur: 399
-    match: {all: ["5060", "ti"], none_of: ["16gb", "16 gb", "laptop"]}
+    attributes: {perf_index: 58.7, vram_gb: 8, tdp_w: 180}
+    retail_fallback_eur: 460
+    match: {all: ["5060", "ti"], none_of: ["16gb", "laptop", "portatil", "notebook"]}
     aliases: ["5060ti"]
 
-  # =========================== NVIDIA 40-series =========================
+  - id: rtx_5060
+    label: "GeForce RTX 5060"
+    brand: nvidia
+    attributes: {perf_index: 51.3, vram_gb: 8, tdp_w: 145}
+    retail_fallback_eur: 360
+    match: {all: ["5060"], none_of: ["ti", "laptop", "portatil", "notebook"]}
+    aliases: ["rtx5060"]
+
+  - id: rtx_5050
+    label: "GeForce RTX 5050"
+    brand: nvidia
+    attributes: {perf_index: 38.8, vram_gb: 8, tdp_w: 130}
+    retail_fallback_eur: 300
+    match: {all: ["5050"], none_of: ["laptop", "portatil", "notebook"]}
+    aliases: ["rtx5050"]
+
+  # ======================== NVIDIA Ada — RTX 40 =====================
   - id: rtx_4090
     label: "GeForce RTX 4090"
     brand: nvidia
-    attributes: {perf_index: 150, vram_gb: 24, tdp_w: 450}
-    retail_fallback_eur: 1899
-    match: {all: ["4090"], none_of: ["laptop", "portatil"]}
-    aliases: ["rtx4090", "rtx 4090"]
+    attributes: {perf_index: 122.8, vram_gb: 24, tdp_w: 450}
+    retail_fallback_eur: 0
+    match: {all: ["4090"], none_of: ["laptop", "portatil", "notebook"]}
+    aliases: ["rtx4090"]
 
   - id: rtx_4080_super
     label: "GeForce RTX 4080 Super"
     brand: nvidia
-    attributes: {perf_index: 103, vram_gb: 16, tdp_w: 320}
-    retail_fallback_eur: 1099
-    match: {all: ["4080", "super"], none_of: ["laptop", "portatil"]}
-    aliases: ["4080s", "4080 super"]
+    attributes: {perf_index: 101.6, vram_gb: 16, tdp_w: 320}
+    retail_fallback_eur: 0
+    match: {all: ["4080", "super"], none_of: ["laptop", "portatil", "notebook"]}
+    aliases: ["4080s"]
 
   - id: rtx_4080
     label: "GeForce RTX 4080"
     brand: nvidia
-    attributes: {perf_index: 100, vram_gb: 16, tdp_w: 320}
-    retail_fallback_eur: 999
-    match: {all: ["4080"], none_of: ["super", "laptop", "portatil"]}
-    aliases: ["rtx4080", "rtx 4080"]
+    attributes: {perf_index: 100.7, vram_gb: 16, tdp_w: 320}
+    retail_fallback_eur: 0
+    match: {all: ["4080"], none_of: ["super", "laptop", "portatil", "notebook"]}
+    aliases: ["rtx4080"]
 
   - id: rtx_4070_ti_super
     label: "GeForce RTX 4070 Ti Super"
     brand: nvidia
-    attributes: {perf_index: 92, vram_gb: 16, tdp_w: 285}
-    retail_fallback_eur: 819
-    match: {all: ["4070", "ti", "super"], none_of: ["laptop"]}
-    aliases: ["4070 ti super", "4070tis"]
-
-  - id: rtx_4070_super
-    label: "GeForce RTX 4070 Super"
-    brand: nvidia
-    attributes: {perf_index: 82, vram_gb: 12, tdp_w: 220}
-    retail_fallback_eur: 629
-    match: {all: ["4070", "super"], none_of: ["ti", "laptop"]}
-    aliases: ["4070s", "4070 super"]
+    attributes: {perf_index: 89.0, vram_gb: 16, tdp_w: 285}
+    retail_fallback_eur: 0
+    match: {all: ["4070", "ti", "super"], none_of: ["laptop", "portatil", "notebook"]}
+    aliases: ["4070tis"]
 
   - id: rtx_4070_ti
     label: "GeForce RTX 4070 Ti"
     brand: nvidia
-    attributes: {perf_index: 84, vram_gb: 12, tdp_w: 285}
-    retail_fallback_eur: 699
-    match: {all: ["4070", "ti"], none_of: ["super", "laptop"]}
+    attributes: {perf_index: 84.0, vram_gb: 12, tdp_w: 285}
+    retail_fallback_eur: 0
+    match: {all: ["4070", "ti"], none_of: ["super", "laptop", "portatil", "notebook"]}
     aliases: ["4070ti"]
+
+  - id: rtx_4070_super
+    label: "GeForce RTX 4070 Super"
+    brand: nvidia
+    attributes: {perf_index: 78.1, vram_gb: 12, tdp_w: 220}
+    retail_fallback_eur: 0
+    match: {all: ["4070", "super"], none_of: ["ti", "laptop", "portatil", "notebook"]}
+    aliases: ["4070s"]
 
   - id: rtx_4070
     label: "GeForce RTX 4070"
     brand: nvidia
-    attributes: {perf_index: 70, vram_gb: 12, tdp_w: 200}
-    retail_fallback_eur: 549
-    match: {all: ["4070"], none_of: ["ti", "super", "laptop", "portatil"]}
-    aliases: ["rtx4070", "rtx 4070"]
+    attributes: {perf_index: 66.6, vram_gb: 12, tdp_w: 200}
+    retail_fallback_eur: 0
+    match: {all: ["4070"], none_of: ["ti", "super", "laptop", "portatil", "notebook"]}
+    aliases: ["rtx4070"]
 
   - id: rtx_4060_ti_16
     label: "GeForce RTX 4060 Ti 16GB"
     brand: nvidia
-    attributes: {perf_index: 57, vram_gb: 16, tdp_w: 165}
-    retail_fallback_eur: 449
-    match: {all: ["4060", "ti"], any_of: ["16gb", "16 gb"], none_of: ["laptop"]}
+    attributes: {perf_index: 51.9, vram_gb: 16, tdp_w: 165}
+    retail_fallback_eur: 0
+    match: {all: ["4060", "ti"], any_of: ["16gb"], none_of: ["laptop", "portatil", "notebook"]}
     aliases: ["4060ti 16gb"]
 
-  - id: rtx_4060_ti
+  - id: rtx_4060_ti_8
     label: "GeForce RTX 4060 Ti 8GB"
     brand: nvidia
-    attributes: {perf_index: 55, vram_gb: 8, tdp_w: 160}
-    retail_fallback_eur: 379
-    match: {all: ["4060", "ti"], none_of: ["16gb", "16 gb", "laptop"]}
+    attributes: {perf_index: 50.4, vram_gb: 8, tdp_w: 160}
+    retail_fallback_eur: 0
+    match: {all: ["4060", "ti"], none_of: ["16gb", "laptop", "portatil", "notebook"]}
     aliases: ["4060ti"]
 
-  # =========================== NVIDIA 30-series =========================
+  - id: rtx_4060
+    label: "GeForce RTX 4060"
+    brand: nvidia
+    attributes: {perf_index: 40.7, vram_gb: 8, tdp_w: 115}
+    retail_fallback_eur: 0
+    match: {all: ["4060"], none_of: ["ti", "laptop", "portatil", "notebook"]}
+    aliases: ["rtx4060"]
+
+  # ======================== NVIDIA Ampere — RTX 30 (not sold new; retail stays 0) ==
+  - id: rtx_3090_ti
+    label: "GeForce RTX 3090 Ti"
+    brand: nvidia
+    attributes: {perf_index: 85.5, vram_gb: 24, tdp_w: 450}
+    retail_fallback_eur: 0
+    match: {all: ["3090", "ti"], none_of: ["laptop", "portatil", "notebook"]}
+    aliases: ["3090ti"]
+
   - id: rtx_3090
     label: "GeForce RTX 3090"
     brand: nvidia
-    attributes: {perf_index: 85, vram_gb: 24, tdp_w: 350}
+    attributes: {perf_index: 78.4, vram_gb: 24, tdp_w: 350}
     retail_fallback_eur: 0
-    match: {all: ["3090"], none_of: ["ti", "laptop"]}
+    match: {all: ["3090"], none_of: ["ti", "laptop", "portatil", "notebook"]}
     aliases: ["rtx3090"]
 
   - id: rtx_3080_ti
     label: "GeForce RTX 3080 Ti"
     brand: nvidia
-    attributes: {perf_index: 84, vram_gb: 12, tdp_w: 350}
+    attributes: {perf_index: 76.4, vram_gb: 12, tdp_w: 350}
     retail_fallback_eur: 0
-    match: {all: ["3080", "ti"], none_of: ["laptop"]}
+    match: {all: ["3080", "ti"], none_of: ["laptop", "portatil", "notebook"]}
     aliases: ["3080ti"]
 
-  - id: rtx_3080
+  - id: rtx_3080_10
     label: "GeForce RTX 3080 10GB"
     brand: nvidia
-    attributes: {perf_index: 78, vram_gb: 10, tdp_w: 320}
+    attributes: {perf_index: 70.2, vram_gb: 10, tdp_w: 320}
     retail_fallback_eur: 0
-    match: {all: ["3080"], none_of: ["ti", "laptop", "portatil"]}
+    match: {all: ["3080"], none_of: ["ti", "laptop", "portatil", "notebook"]}
     aliases: ["rtx3080"]
+
+  - id: rtx_3070_ti
+    label: "GeForce RTX 3070 Ti"
+    brand: nvidia
+    attributes: {perf_index: 57.3, vram_gb: 8, tdp_w: 290}
+    retail_fallback_eur: 0
+    match: {all: ["3070", "ti"], none_of: ["laptop", "portatil", "notebook"]}
+    aliases: ["3070ti"]
 
   - id: rtx_3070
     label: "GeForce RTX 3070"
     brand: nvidia
-    attributes: {perf_index: 57, vram_gb: 8, tdp_w: 220}
+    attributes: {perf_index: 49.9, vram_gb: 8, tdp_w: 220}
     retail_fallback_eur: 0
-    match: {all: ["3070"], none_of: ["ti", "laptop", "portatil"]}
+    match: {all: ["3070"], none_of: ["ti", "laptop", "portatil", "notebook"]}
     aliases: ["rtx3070"]
+
+  - id: rtx_3060_ti
+    label: "GeForce RTX 3060 Ti"
+    brand: nvidia
+    attributes: {perf_index: 43.7, vram_gb: 8, tdp_w: 200}
+    retail_fallback_eur: 0
+    match: {all: ["3060", "ti"], none_of: ["laptop", "portatil", "notebook"]}
+    aliases: ["3060ti"]
 
   - id: rtx_3060_12
     label: "GeForce RTX 3060 12GB"
     brand: nvidia
-    attributes: {perf_index: 40, vram_gb: 12, tdp_w: 170}
+    attributes: {perf_index: 35.8, vram_gb: 12, tdp_w: 170}
     retail_fallback_eur: 0
-    match: {all: ["3060"], none_of: ["ti", "laptop", "portatil"]}
+    match: {all: ["3060"], none_of: ["ti", "laptop", "portatil", "notebook"]}
     aliases: ["rtx3060"]
 
-  # ============================== AMD RDNA4 =============================
+  - id: rtx_3050
+    label: "GeForce RTX 3050"
+    brand: nvidia
+    attributes: {perf_index: 25.5, vram_gb: 8, tdp_w: 130}
+    retail_fallback_eur: 0
+    match: {all: ["3050"], none_of: ["laptop", "portatil", "notebook"]}
+    aliases: ["rtx3050"]
+
+  # ======================== AMD RDNA4 — RX 9000 =====================
   - id: rx_9070_xt
     label: "Radeon RX 9070 XT"
     brand: amd
-    attributes: {perf_index: 101, vram_gb: 16, tdp_w: 304}
-    retail_fallback_eur: 729
-    match: {all: ["9070", "xt"], none_of: ["gre", "laptop"]}
-    aliases: ["9070xt", "rx9070xt", "rx 9070 xt"]
+    attributes: {perf_index: 99.9, vram_gb: 16, tdp_w: 304}
+    retail_fallback_eur: 730
+    match: {all: ["9070", "xt"], none_of: ["gre", "laptop", "portatil", "notebook"]}
+    aliases: ["9070xt", "rx9070xt"]
+
+  - id: rx_9070_gre
+    label: "Radeon RX 9070 GRE"
+    brand: amd
+    attributes: {perf_index: 74.2, vram_gb: 12, tdp_w: 220}
+    retail_fallback_eur: 0
+    match: {all: ["9070", "gre"], none_of: ["laptop", "portatil", "notebook"]}
+    aliases: ["9070gre"]
 
   - id: rx_9070
     label: "Radeon RX 9070"
     brand: amd
-    attributes: {perf_index: 88, vram_gb: 16, tdp_w: 220}
-    retail_fallback_eur: 629
-    match: {all: ["9070"], none_of: ["xt", "gre", "laptop"]}
-    aliases: ["rx9070", "rx 9070"]
+    attributes: {perf_index: 89.0, vram_gb: 16, tdp_w: 220}
+    retail_fallback_eur: 670
+    match: {all: ["9070"], none_of: ["xt", "gre", "laptop", "portatil", "notebook"]}
+    aliases: ["rx9070"]
 
   - id: rx_9060_xt_16
     label: "Radeon RX 9060 XT 16GB"
     brand: amd
-    attributes: {perf_index: 60, vram_gb: 16, tdp_w: 180}
-    retail_fallback_eur: 379
-    match: {all: ["9060", "xt"], any_of: ["16gb", "16 gb"]}
+    attributes: {perf_index: 57.6, vram_gb: 16, tdp_w: 160}
+    retail_fallback_eur: 430
+    match: {all: ["9060", "xt"], any_of: ["16gb"], none_of: ["laptop", "portatil", "notebook"]}
     aliases: ["9060xt 16gb"]
 
-  # ============================== AMD RDNA3 =============================
+  - id: rx_9060_xt_8
+    label: "Radeon RX 9060 XT 8GB"
+    brand: amd
+    attributes: {perf_index: 53.4, vram_gb: 8, tdp_w: 150}
+    retail_fallback_eur: 360
+    match: {all: ["9060", "xt"], none_of: ["16gb", "laptop", "portatil", "notebook"]}
+    aliases: ["9060xt"]
+
+  # ======================== AMD RDNA3 — RX 7000 =====================
   - id: rx_7900_xtx
     label: "Radeon RX 7900 XTX"
     brand: amd
-    attributes: {perf_index: 118, vram_gb: 24, tdp_w: 355}
-    retail_fallback_eur: 949
-    match: {all: ["7900", "xtx"]}
-    aliases: ["7900xtx", "rx7900xtx"]
+    attributes: {perf_index: 104.7, vram_gb: 24, tdp_w: 355}
+    retail_fallback_eur: 0
+    match: {all: ["7900", "xtx"], none_of: ["laptop", "portatil", "notebook"]}
+    aliases: ["7900xtx"]
 
   - id: rx_7900_xt
     label: "Radeon RX 7900 XT"
     brand: amd
-    attributes: {perf_index: 101, vram_gb: 20, tdp_w: 315}
-    retail_fallback_eur: 749
-    match: {all: ["7900", "xt"], none_of: ["xtx", "gre"]}
+    attributes: {perf_index: 92.6, vram_gb: 20, tdp_w: 315}
+    retail_fallback_eur: 0
+    match: {all: ["7900", "xt"], none_of: ["xtx", "gre", "laptop", "portatil", "notebook"]}
     aliases: ["7900xt"]
 
   - id: rx_7900_gre
     label: "Radeon RX 7900 GRE"
     brand: amd
-    attributes: {perf_index: 88, vram_gb: 16, tdp_w: 260}
+    attributes: {vram_gb: 16, tdp_w: 260}
     retail_fallback_eur: 0
-    match: {all: ["7900", "gre"]}
+    match: {all: ["7900", "gre"], none_of: ["laptop", "portatil", "notebook"]}
     aliases: ["7900gre"]
 
   - id: rx_7800_xt
     label: "Radeon RX 7800 XT"
     brand: amd
-    attributes: {perf_index: 78, vram_gb: 16, tdp_w: 263}
-    retail_fallback_eur: 499
-    match: {all: ["7800", "xt"]}
+    attributes: {perf_index: 72.6, vram_gb: 16, tdp_w: 263}
+    retail_fallback_eur: 0
+    match: {all: ["7800", "xt"], none_of: ["laptop", "portatil", "notebook"]}
     aliases: ["7800xt"]
 
   - id: rx_7700_xt
     label: "Radeon RX 7700 XT"
     brand: amd
-    attributes: {perf_index: 66, vram_gb: 12, tdp_w: 245}
-    retail_fallback_eur: 399
-    match: {all: ["7700", "xt"]}
+    attributes: {perf_index: 62.2, vram_gb: 12, tdp_w: 245}
+    retail_fallback_eur: 0
+    match: {all: ["7700", "xt"], none_of: ["laptop", "portatil", "notebook"]}
     aliases: ["7700xt"]
 
-  # ============================== AMD RDNA2 =============================
+  - id: rx_7600_xt
+    label: "Radeon RX 7600 XT"
+    brand: amd
+    attributes: {perf_index: 43.0, vram_gb: 16, tdp_w: 190}
+    retail_fallback_eur: 0
+    match: {all: ["7600", "xt"], none_of: ["laptop", "portatil", "notebook"]}
+    aliases: ["7600xt"]
+
+  - id: rx_7600
+    label: "Radeon RX 7600"
+    brand: amd
+    attributes: {perf_index: 39.0, vram_gb: 8, tdp_w: 165}
+    retail_fallback_eur: 0
+    match: {all: ["7600"], none_of: ["xt", "laptop", "portatil", "notebook"]}
+    aliases: ["rx7600"]
+
+  # ======================== AMD RDNA2 — RX 6000 =====================
+  - id: rx_6950_xt
+    label: "Radeon RX 6950 XT"
+    brand: amd
+    attributes: {perf_index: 76.6, vram_gb: 16, tdp_w: 335}
+    retail_fallback_eur: 0
+    match: {all: ["6950", "xt"], none_of: ["laptop", "portatil", "notebook"]}
+    aliases: ["6950xt"]
+
+  - id: rx_6900_xt
+    label: "Radeon RX 6900 XT"
+    brand: amd
+    attributes: {perf_index: 71.9, vram_gb: 16, tdp_w: 300}
+    retail_fallback_eur: 0
+    match: {all: ["6900", "xt"], none_of: ["laptop", "portatil", "notebook"]}
+    aliases: ["6900xt"]
+
   - id: rx_6800_xt
     label: "Radeon RX 6800 XT"
     brand: amd
-    attributes: {perf_index: 76, vram_gb: 16, tdp_w: 300}
+    attributes: {perf_index: 68.2, vram_gb: 16, tdp_w: 300}
     retail_fallback_eur: 0
-    match: {all: ["6800", "xt"]}
+    match: {all: ["6800", "xt"], none_of: ["laptop", "portatil", "notebook"]}
     aliases: ["6800xt"]
+
+  - id: rx_6800
+    label: "Radeon RX 6800"
+    brand: amd
+    attributes: {vram_gb: 16, tdp_w: 250}
+    retail_fallback_eur: 0
+    match: {all: ["6800"], none_of: ["xt", "laptop", "portatil", "notebook"]}
+    aliases: ["rx6800"]
+
+  - id: rx_6750_xt
+    label: "Radeon RX 6750 XT"
+    brand: amd
+    attributes: {perf_index: 49.3, vram_gb: 12, tdp_w: 250}
+    retail_fallback_eur: 0
+    match: {all: ["6750", "xt"], none_of: ["laptop", "portatil", "notebook"]}
+    aliases: ["6750xt"]
 
   - id: rx_6700_xt
     label: "Radeon RX 6700 XT"
     brand: amd
-    attributes: {perf_index: 55, vram_gb: 12, tdp_w: 230}
+    attributes: {perf_index: 46.6, vram_gb: 12, tdp_w: 230}
     retail_fallback_eur: 0
-    match: {all: ["6700", "xt"]}
+    match: {all: ["6700", "xt"], none_of: ["laptop", "portatil", "notebook"]}
     aliases: ["6700xt"]
 
-  # ============================== Intel =================================
+  - id: rx_6650_xt
+    label: "Radeon RX 6650 XT"
+    brand: amd
+    attributes: {perf_index: 32.5, vram_gb: 8, tdp_w: 180}
+    retail_fallback_eur: 0
+    match: {all: ["6650", "xt"], none_of: ["laptop", "portatil", "notebook"]}
+    aliases: ["6650xt"]
+
+  - id: rx_6600_xt
+    label: "Radeon RX 6600 XT"
+    brand: amd
+    attributes: {perf_index: 34.8, vram_gb: 8, tdp_w: 160}
+    retail_fallback_eur: 0
+    match: {all: ["6600", "xt"], none_of: ["laptop", "portatil", "notebook"]}
+    aliases: ["6600xt"]
+
+  - id: rx_6600
+    label: "Radeon RX 6600"
+    brand: amd
+    attributes: {perf_index: 21.3, vram_gb: 8, tdp_w: 132}
+    retail_fallback_eur: 0
+    match: {all: ["6600"], none_of: ["xt", "laptop", "portatil", "notebook"]}
+    aliases: ["rx6600"]
+
+  # ======================== Intel Arc ===============================
   - id: arc_b580
     label: "Arc B580"
     brand: intel
-    attributes: {perf_index: 48, vram_gb: 12, tdp_w: 190}
-    retail_fallback_eur: 289
-    match: {all: ["b580"]}
+    attributes: {perf_index: 43.4, vram_gb: 12, tdp_w: 190}
+    retail_fallback_eur: 300
+    match: {all: ["b580"], none_of: ["laptop", "portatil", "notebook"]}
     aliases: ["arc b580"]
+
+  - id: arc_b570
+    label: "Arc B570"
+    brand: intel
+    attributes: {perf_index: 38.0, vram_gb: 10, tdp_w: 150}
+    retail_fallback_eur: 270
+    match: {all: ["b570"], none_of: ["laptop", "portatil", "notebook"]}
+    aliases: ["arc b570"]
+
+  # ======================== Older cards — tracked for price, no verified benchmark ==
+  - id: rtx_2080_ti
+    label: "GeForce RTX 2080 Ti"
+    brand: nvidia
+    attributes: {vram_gb: 11, tdp_w: 250}
+    retail_fallback_eur: 0
+    match: {all: ["2080", "ti"], none_of: ["laptop", "portatil", "notebook"]}
+    aliases: ["2080ti"]
+
+  - id: rtx_2080_super
+    label: "GeForce RTX 2080 Super"
+    brand: nvidia
+    attributes: {vram_gb: 8, tdp_w: 250}
+    retail_fallback_eur: 0
+    match: {all: ["2080", "super"], none_of: ["laptop", "portatil", "notebook"]}
+    aliases: ["2080s"]
+
+  - id: rtx_2080
+    label: "GeForce RTX 2080"
+    brand: nvidia
+    attributes: {vram_gb: 8, tdp_w: 215}
+    retail_fallback_eur: 0
+    match: {all: ["2080"], none_of: ["ti", "super", "laptop", "portatil", "notebook"]}
+    aliases: ["rtx2080"]
+
+  - id: rtx_2070_super
+    label: "GeForce RTX 2070 Super"
+    brand: nvidia
+    attributes: {vram_gb: 8, tdp_w: 215}
+    retail_fallback_eur: 0
+    match: {all: ["2070", "super"], none_of: ["laptop", "portatil", "notebook"]}
+    aliases: ["2070s"]
+
+  - id: rtx_2070
+    label: "GeForce RTX 2070"
+    brand: nvidia
+    attributes: {vram_gb: 8, tdp_w: 175}
+    retail_fallback_eur: 0
+    match: {all: ["2070"], none_of: ["super", "laptop", "portatil", "notebook"]}
+    aliases: ["rtx2070"]
+
+  - id: rtx_2060_super
+    label: "GeForce RTX 2060 Super"
+    brand: nvidia
+    attributes: {vram_gb: 8, tdp_w: 175}
+    retail_fallback_eur: 0
+    match: {all: ["2060", "super"], none_of: ["laptop", "portatil", "notebook"]}
+    aliases: ["2060s"]
+
+  - id: rtx_2060
+    label: "GeForce RTX 2060"
+    brand: nvidia
+    attributes: {vram_gb: 6, tdp_w: 160}
+    retail_fallback_eur: 0
+    match: {all: ["2060"], none_of: ["super", "laptop", "portatil", "notebook"]}
+    aliases: ["rtx2060"]
+
+  - id: gtx_1080_ti
+    label: "GeForce GTX 1080 Ti"
+    brand: nvidia
+    attributes: {vram_gb: 11, tdp_w: 250}
+    retail_fallback_eur: 0
+    match: {all: ["1080", "ti"], none_of: ["laptop", "portatil", "notebook"]}
+    aliases: ["1080ti"]
+
+  - id: gtx_1080
+    label: "GeForce GTX 1080"
+    brand: nvidia
+    attributes: {vram_gb: 8, tdp_w: 180}
+    retail_fallback_eur: 0
+    match: {all: ["1080"], none_of: ["ti", "laptop", "portatil", "notebook"]}
+    aliases: ["gtx1080"]
+
+  - id: gtx_1070_ti
+    label: "GeForce GTX 1070 Ti"
+    brand: nvidia
+    attributes: {vram_gb: 8, tdp_w: 180}
+    retail_fallback_eur: 0
+    match: {all: ["1070", "ti"], none_of: ["laptop", "portatil", "notebook"]}
+    aliases: ["1070ti"]
+
+  - id: gtx_1070
+    label: "GeForce GTX 1070"
+    brand: nvidia
+    attributes: {vram_gb: 8, tdp_w: 150}
+    retail_fallback_eur: 0
+    match: {all: ["1070"], none_of: ["ti", "laptop", "portatil", "notebook"]}
+    aliases: ["gtx1070"]
+
+  - id: gtx_1660_super
+    label: "GeForce GTX 1660 Super"
+    brand: nvidia
+    attributes: {vram_gb: 6, tdp_w: 125}
+    retail_fallback_eur: 0
+    match: {all: ["1660", "super"], none_of: ["laptop", "portatil", "notebook"]}
+    aliases: ["1660s"]
+
+  - id: gtx_1660_ti
+    label: "GeForce GTX 1660 Ti"
+    brand: nvidia
+    attributes: {vram_gb: 6, tdp_w: 120}
+    retail_fallback_eur: 0
+    match: {all: ["1660", "ti"], none_of: ["laptop", "portatil", "notebook"]}
+    aliases: ["1660ti"]
+
+  - id: gtx_1660
+    label: "GeForce GTX 1660"
+    brand: nvidia
+    attributes: {vram_gb: 6, tdp_w: 120}
+    retail_fallback_eur: 0
+    match: {all: ["1660"], none_of: ["ti", "super", "laptop", "portatil", "notebook"]}
+    aliases: ["gtx1660"]
+
+  - id: gtx_1650
+    label: "GeForce GTX 1650"
+    brand: nvidia
+    attributes: {vram_gb: 4, tdp_w: 75}
+    retail_fallback_eur: 0
+    match: {all: ["1650"], none_of: ["super", "laptop", "portatil", "notebook"]}
+    aliases: ["gtx1650"]
+
+  - id: gtx_1060_6
+    label: "GeForce GTX 1060 6GB"
+    brand: nvidia
+    attributes: {vram_gb: 6, tdp_w: 120}
+    retail_fallback_eur: 0
+    match: {all: ["1060"], none_of: ["laptop", "portatil", "notebook"]}
+    aliases: ["gtx1060"]
+

@@ -18,6 +18,13 @@ _ALPHA_DIGIT = re.compile(r"(?<=[a-z])(?=[0-9])")
 _DIGIT_ALPHA = re.compile(r"(?<=[0-9])(?=[a-z])")
 # "16 gb" / "16go" -> "16gb"  (run AFTER the boundary split, which creates the gap)
 _VRAM = re.compile(r"\b(\d{1,2})\s*(?:gb|go|gigas)\b")
+# Screen resolutions, dropped entirely. "1080p" survives the letter/digit split
+# as the tokens {1080, p}, and 1080 is a GPU model number — so a monitor
+# advertised as "1080p 144Hz" matched the GTX 1080 rule and walked straight
+# into that card's price distribution. Resolutions are never model numbers, so
+# the safe fix is to delete them before matching rather than to teach every
+# affected rule about them.
+_RESOLUTION = re.compile(r"\b\d{3,4} p\b")
 _MULTISPACE = re.compile(r"\s+")
 
 # Marketing filler: never identifies a product, does confuse fuzzy matching.
@@ -53,6 +60,7 @@ def normalize(text: str) -> str:
     out = _DIGIT_ALPHA.sub(" ", out)
     out = _MULTISPACE.sub(" ", out).strip()
     out = _VRAM.sub(r"\1gb", out)
+    out = _RESOLUTION.sub(" ", out)
     return _MULTISPACE.sub(" ", out).strip()
 
 
